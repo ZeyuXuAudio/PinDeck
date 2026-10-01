@@ -1,0 +1,12 @@
+# Runtime files of older PinDeck versions (now kept in ~/.pindeck)
+.state/
+
+# Private material: stays on this machine, never in git
+audiolabs-example/
+NDC_Interspeech2026_weilong_v3.pptx
+example-handout.pdf
+*.bundle
+
+# System and tooling
+.DS_Store
+node_modules/

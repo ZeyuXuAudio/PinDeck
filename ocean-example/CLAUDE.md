@@ -11,14 +11,14 @@
 
 ## Element ids (`data-eid`)
 
-When the deck is opened in PinDeck (`../editor`), every slide and visible element gets a
+When the deck is opened in PinDeck (one folder up), every slide and visible element gets a
 `data-eid` attribute. Keep ids unchanged when editing an element. Give new elements
 `data-eid="<slide-id>/<short-name>"` and new slides a new id (a slug of the title).
 
 ## Checking layout
 
-When PinDeck is running (`node ../editor/server.mjs .`):
+When PinDeck is running (`node ../server.mjs .`):
 
-- `node ../editor/cli.mjs layout <slide-id or number>`: measured boxes, font sizes and layout issues.
-- `node ../editor/cli.mjs shot <slide-id or number>`: PNG screenshot; prints the path.
-- `node ../editor/cli.mjs slides`: slide numbers and ids.
+- `node ../cli.mjs layout <slide-id or number>`: measured boxes, font sizes and layout issues.
+- `node ../cli.mjs shot <slide-id or number>`: PNG screenshot; prints the path.
+- `node ../cli.mjs slides`: slide numbers and ids.

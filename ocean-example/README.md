@@ -9,7 +9,7 @@ Every name, logo and number in it is a placeholder. Everything is bundled, so it
 * Open `index.html` in Chrome, Edge, Firefox or Safari. No server needed.
 * Keys: arrows to move, `S` speaker view with notes, `O` overview, `F` full screen, `Esc` back.
 * PDF handout: open `index.html?print-pdf` and print to PDF (margins: none, background graphics: on).
-* Edit with Claude: `node ../editor/server.mjs .` from this folder opens it in PinDeck.
+* Edit with Claude: `node ../server.mjs .` from this folder opens it in PinDeck.
 
 ## Make it yours
 

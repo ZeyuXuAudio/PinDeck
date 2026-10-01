@@ -53,19 +53,6 @@ if (!fs.existsSync(path.join(DECK_DIR, DECK_FILE))) {
   process.exit(1);
 }
 fs.mkdirSync(SHOT_DIR, { recursive: true });
-// one-time move from the old location (editor/.state, before PinDeck became a package)
-const OLD_STATE = path.join(EDITOR_DIR, ".state");
-if (fs.existsSync(path.join(OLD_STATE, "chat.json")) && !fs.existsSync(path.join(STATE_DIR, "chat.json"))) {
-  try {
-    const old = JSON.parse(fs.readFileSync(path.join(OLD_STATE, "server.json"), "utf8"));
-    if (path.resolve(old.deckDir || "") === DECK_DIR || path.basename(old.deckDir || "") === "audiolabs-template") {
-      fs.copyFileSync(path.join(OLD_STATE, "chat.json"), path.join(STATE_DIR, "chat.json"));
-      if (fs.existsSync(path.join(OLD_STATE, "backups")))
-        fs.cpSync(path.join(OLD_STATE, "backups"), path.join(STATE_DIR, "backups"), { recursive: true });
-      console.log(`Moved the chat history from ${OLD_STATE} to ${STATE_DIR}.`);
-    }
-  } catch {}
-}
 const serverInfo = JSON.stringify({ url: ORIGIN, token: TOKEN, deckDir: DECK_DIR, pid: process.pid }, null, 2);
 fs.writeFileSync(path.join(STATE_DIR, "server.json"), serverInfo);
 fs.writeFileSync(path.join(HOME_DIR, "server.json"), serverInfo); // the CLI's fallback: most recent server

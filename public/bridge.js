@@ -9,11 +9,11 @@
 (function () {
   const params = new URLSearchParams(location.search);
   const MODE = params.get("editor");
-  // A deck can describe itself with <meta name="pindeck:footer-top"> and <meta name="pindeck:locked">;
-  // the defaults fit the AudioLabs template (footer rule centred on y = 648.7, 3 px).
+  // A deck describes itself with <meta name="pindeck:footer-top"> (no footer check without it) and
+  // <meta name="pindeck:locked"> (brand elements that cannot be selected or moved).
   const deckMeta = (n) => document.querySelector(`meta[name="pindeck:${n}"]`)?.content?.trim();
-  const FOOTER_TOP = +(deckMeta("footer-top") || 647);
-  const LOCKED_SEL = deckMeta("locked") || ".slide-foot, .logo-al, .logo-fau, .logo-fh, .banner";
+  const FOOTER_TOP = deckMeta("footer-top") ? +deckMeta("footer-top") : null;
+  const LOCKED_SEL = deckMeta("locked") || ".slide-foot, .logo";
   const host = () => (window.parent !== window ? window.parent.__editorHost : null);
   let W = 1280, H = 720;
 
@@ -153,7 +153,7 @@
       if (e.x < -1 || e.y < -1 || e.x + e.w > W + 1 || e.y + e.h > H + 1) {
         if (!underFlagged(el)) issues.push(`${rel(e.eid)} extends outside the slide (box x=${e.x}..${e.x + e.w}, y=${e.y}..${e.y + e.h})`);
         flagged.add(el);
-      } else if (si.hasFooter && e.y + e.h > FOOTER_TOP + 1 && e.y < H) {
+      } else if (si.hasFooter && FOOTER_TOP != null && e.y + e.h > FOOTER_TOP + 1 && e.y < H) {
         if (!underFlagged(el)) issues.push(`${rel(e.eid)} reaches y=${e.y + e.h}, below the footer rule (y=${FOOTER_TOP})`);
         flagged.add(el);
       }
@@ -385,7 +385,7 @@
   /* Snap targets: slide edges and centre, the footer rule, and the edges and centres of other elements */
   function snapTargets(sec, el) {
     const xs = [0, W / 2, W], ys = [0, H / 2, H];
-    if (sec.querySelector(".slide-foot")) ys.push(FOOTER_TOP);
+    if (FOOTER_TOP != null && sec.querySelector(".slide-foot")) ys.push(FOOTER_TOP);
     for (const o of sec.querySelectorAll("[data-eid]")) {
       if (o === el || el.contains(o) || o.contains(el)) continue;
       if (o.closest("svg") && o.tagName.toLowerCase() !== "svg") continue;

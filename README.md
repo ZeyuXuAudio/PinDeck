@@ -4,12 +4,11 @@
 the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
 pin them, write what to change, and Claude edits the HTML and CSS. The slide updates in place.
 
-It is built for reveal.js decks. `audiolabs-example` is the reference deck; its specifics (the
-locked `brand.css`, the footer rule at y = 647) are still built in and will move to a per-deck config.
+It is built for reveal.js decks; `ocean-example/` is a complete example deck.
 
 ```bash
 npx pindeck path/to/deck        # once published on npm
-node editor/server.mjs audiolabs-example   # from this repository
+node server.mjs ocean-example   # from this repository
 ```
 
 Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `claude` CLI, signed in
@@ -30,8 +29,8 @@ optional `<meta>` tags in the deck's `<head>` tell it about the design:
 <meta name="pindeck:locked" content=".slide-foot, .logo"> <!-- brand elements that cannot be selected or moved -->
 ```
 
-Without them PinDeck uses the AudioLabs values (footer at y = 647, AudioLabs logo classes). A file
-called `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
+Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
+`brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
 
 ## Working with it
 
@@ -73,7 +72,7 @@ the files changed. CSS changes are swapped in without a reload.
 * **Layout instead of screenshots.** With each message the editor measures the current slide and
   every pinned slide in your browser: position and size of every element, font sizes, and issues
   (content below the footer rule, outside the slide, overlaps, clipped text). Claude gets this as
-  text. To check its own work it runs `node ../editor/cli.mjs layout <slide>`. Screenshots are
+  text. To check its own work it runs `node ../cli.mjs layout <slide>`. Screenshots are
   only taken when you tick the box or Claude needs a visual judgement.
 * **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
   running, so there is no start-up delay per message. It runs in the deck folder under your Claude
