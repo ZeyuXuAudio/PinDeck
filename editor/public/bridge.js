@@ -9,8 +9,11 @@
 (function () {
   const params = new URLSearchParams(location.search);
   const MODE = params.get("editor");
-  const FOOTER_TOP = 647;   // footer rule, brand.css (centred on y = 648.7, 3 px)
-  const LOCKED_SEL = ".slide-foot, .logo-al, .logo-fau, .logo-fh, .banner";
+  // A deck can describe itself with <meta name="pindeck:footer-top"> and <meta name="pindeck:locked">;
+  // the defaults fit the AudioLabs template (footer rule centred on y = 648.7, 3 px).
+  const deckMeta = (n) => document.querySelector(`meta[name="pindeck:${n}"]`)?.content?.trim();
+  const FOOTER_TOP = +(deckMeta("footer-top") || 647);
+  const LOCKED_SEL = deckMeta("locked") || ".slide-foot, .logo-al, .logo-fau, .logo-fh, .banner";
   const host = () => (window.parent !== window ? window.parent.__editorHost : null);
   let W = 1280, H = 720;
 
@@ -128,7 +131,7 @@
       const b = boxOf(el, sec);
       let depth = 0;
       for (let p = el.parentElement; p && p !== sec.parentElement; p = p.parentElement) if (p.dataset?.eid) depth++;
-      const hidden = cs.display === "none" || cs.visibility === "hidden" || (b.w === 0 && b.h === 0);
+      const hidden = cs.display === "none" || cs.visibility === "hidden" || +cs.opacity === 0 || (b.w === 0 && b.h === 0);
       const leaf = !el.querySelector("[data-eid]");
       const own = el === sec ? "" : textOf(el, !leaf);
       const tag = el.tagName.toLowerCase() + (el.classList.length ? "." + [...el.classList].filter((c) => !/^(fragment|visible|current-fragment|present|past|future)$/.test(c)).join(".") : "");

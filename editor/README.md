@@ -20,6 +20,19 @@ Options: `--port 5180`, `--model <name>` (otherwise Claude Code's default model)
 folder defaults to the current folder and must contain `index.html`. Runtime files (chat history,
 screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), not in the deck.
 
+## Preparing a deck
+
+PinDeck works with reveal.js decks whose slides are `<section>` elements inside `.slides`. Two
+optional `<meta>` tags in the deck's `<head>` tell it about the design:
+
+```html
+<meta name="pindeck:footer-top" content="652">          <!-- y of the footer rule: content must stay above it -->
+<meta name="pindeck:locked" content=".slide-foot, .logo"> <!-- brand elements that cannot be selected or moved -->
+```
+
+Without them PinDeck uses the AudioLabs values (footer at y = 647, AudioLabs logo classes). A file
+called `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
+
 ## Working with it
 
 | Action | How |
@@ -83,7 +96,7 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.3
+## Limits of version 1.4
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
@@ -96,6 +109,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.4**: decks describe their footer and locked brand elements with `<meta name="pindeck:...">`
+  tags; the layout check ignores invisible elements. New public example deck: `ocean-example/`.
 * **1.3**: `Enter` in a bullet starts a new bullet (split at the cursor); empty new bullets
   are removed again.
 * **1.2**: text editing on the slide (double-click or Enter), with math as TeX, table cells,
