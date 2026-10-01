@@ -160,11 +160,11 @@ async function undoRedo(which) {
   if (!res.ok) toast((await res.json().catch(() => ({}))).error || `Nothing to ${which}.`);
 }
 let toastTimer = null;
-function toast(msg) {
-  $("toast").textContent = msg;
+function toast(msg, { html = false, ms = 3200 } = {}) {
+  $("toast")[html ? "innerHTML" : "textContent"] = msg;
   $("toast").hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => ($("toast").hidden = true), 3200);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), ms);
 }
 
 async function measureSlide(index) {
@@ -216,6 +216,38 @@ $("pin-toggle").onclick = () => setMode(state.mode === "pin" ? "select" : "pin")
 $("select-toggle").onclick = () => setMode("select");
 $("undo").onclick = () => undoRedo("undo");
 $("redo").onclick = () => undoRedo("redo");
+/* ---- PDF export ---------------------------------------------------------------------------- */
+function setExportMenu(open) {
+  $("export-menu").hidden = !open;
+  $("export-btn").setAttribute("aria-expanded", String(open));
+}
+$("export-btn").onclick = (e) => { e.stopPropagation(); setExportMenu($("export-menu").hidden); };
+document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) setExportMenu(false); });
+$("export-menu").addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-export]");
+  if (!item) return;
+  setExportMenu(false);
+  const kind = item.dataset.export, label = kind === "presentation" ? "presentation" : "handout";
+  const btn = $("export-btn");
+  btn.disabled = true;
+  btn.textContent = "Exporting…";
+  toast(`Creating the ${label} PDF…`, { ms: 60000 });
+  try {
+    flushNudge();
+    await editChain;   // export what is saved, including the latest hand edits
+    const res = await api("export", { kind });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || "Export failed.");
+    toast(`Saved ${esc(d.rel)} (${Math.round(d.bytes / 1024)} kB)<a href="${d.url}" target="_blank" rel="noopener">Open</a>`,
+      { html: true, ms: 10000 });
+  } catch (err) {
+    toast(String(err.message || err), { ms: 6000 });
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Export ▾";
+  }
+});
+
 $("present").onclick = () => {
   const ix = main?.bridge.indices(state.current) || { h: 0, v: 0 };
   window.open(`/deck/index.html#/${ix.h}${ix.v ? "/" + ix.v : ""}`, "_blank");

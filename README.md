@@ -44,6 +44,7 @@ Without them PinDeck runs no footer check and locks only `.slide-foot` and `.log
 | Visual questions | Tick "Include screenshot" to attach the current slide with the pin markers. |
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
+| Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
 You can also edit `index.html` or `theme.css` in any editor; the slide reloads, and Claude is told
@@ -88,14 +89,15 @@ the files changed. CSS changes are swapped in without a reload.
 | File | Purpose |
 |---|---|
 | `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
-| `cli.mjs` | `layout`, `shot` and `slides` commands for Claude (and for you). |
+| `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` and `pdf presentation` commands for Claude (and for you). |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
+| `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
 | `lib/claude.mjs` | The long-running Claude Code process. |
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.4
+## Limits of version 1.5
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
@@ -108,6 +110,7 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.5**: PDF export (handout and presentation with build steps on separate pages).
 * **1.4**: decks describe their footer and locked brand elements with `<meta name="pindeck:...">`
   tags; the layout check ignores invisible elements. New public example deck: `ocean-example/`.
 * **1.3**: `Enter` in a bullet starts a new bullet (split at the cursor); empty new bullets

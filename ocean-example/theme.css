@@ -195,4 +195,6 @@ svg.diagram .wire.flow { stroke-dasharray: 10 8; animation: flow 1.1s linear inf
   html, body, .reveal-viewport, .reveal, .reveal .slides, .reveal .pdf-page { background: #fff !important; }
   svg.diagram .wire.flow { animation: none; }
   .play-btn { display: none; }
+  /* gradient-filled text prints with a box around it in Chrome: use the solid accent instead */
+  .stat .num { background: none; color: var(--ocean); }
 }

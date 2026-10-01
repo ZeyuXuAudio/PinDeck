@@ -33,6 +33,8 @@ overlapping elements, clipped text). Fix what you caused. Use
   {{CLI}} shot <slide-eid or number>
 only when you need a visual judgement the numbers cannot give (balance, figure content, colour)
 or the user asks; it prints the path of a PNG, which you then Read.
+If the user asks for a PDF, run `{{CLI}} pdf handout` (one page per slide, build steps complete) or
+`{{CLI}} pdf presentation` (one page per build step); it prints the path of the PDF.
 
 ## Hand edits
 The user can also select, move and resize elements in the editor. Those changes are written as

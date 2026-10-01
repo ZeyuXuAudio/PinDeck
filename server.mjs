@@ -7,7 +7,8 @@
    - pushes file changes to the browser (server-sent events) for live reload
    - runs one long-lived Claude Code process for the chat sidebar
    - snapshots files around every Claude turn for diffs and undo
-   - answers `cli.mjs layout|shot|slides` for Claude's self-checks
+   - answers `cli.mjs layout|shot|slides|pdf` for Claude's self-checks and exports
+   - exports the deck as a PDF handout or a PDF presentation (build steps on separate pages)
    Listens on 127.0.0.1 only; every API call needs the per-run token.
    Runtime files (chat, screenshots, backups) live in ~/.pindeck, never in the deck or the package. */
 
@@ -22,6 +23,7 @@ import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAft
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
+import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
 const USAGE = `Usage: pindeck [deck-folder] [--port 5180] [--model <name>]
@@ -190,6 +192,33 @@ function measureInEditor(slide) {
 }
 const measure = (slide) => measureInEditor(slide).catch(() => measureHeadless(slide));
 
+/* PDF export. handout: one page per slide, build steps in their final state.
+   presentation: one page per build step (a slide with two clicks gives three pages).
+   Files go to <deck>/export/. One export at a time. */
+let exportQueue = Promise.resolve(), snapSeq = 0;
+const snapshots = new Map();   // id -> static print layout, served at /deck/__pindeck-print-<id>.html
+function exportPdf(kind) {
+  if (!CHROME) return Promise.reject(new Error("PDF export needs Chrome or Chromium (set CHROME_BIN)."));
+  const split = kind === "presentation";
+  const name = `${path.basename(DECK_DIR)}-${split ? "presentation" : "handout"}.pdf`;
+  const out = path.join(DECK_DIR, "export", name);
+  const profile = (step) => path.join(STATE_DIR, "chrome", `pdf-${process.pid}-${Date.now()}-${step}`);
+  const run = async () => {
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    const html = await printLayout(CHROME,
+      `${ORIGIN}/deck/${DECK_FILE}?editor=pdf&print-pdf&pdfSeparateFragments=${split}`, profile("layout"));
+    const id = `${process.pid}-${++snapSeq}`;
+    snapshots.set(id, html);
+    try { await printPdf(CHROME, `${ORIGIN}/deck/__pindeck-print-${id}.html`, out, profile("print")); }
+    finally { snapshots.delete(id); }
+    return { kind: split ? "presentation" : "handout", path: out, rel: path.relative(DECK_DIR, out),
+      url: `/deck/export/${encodeURIComponent(name)}`, bytes: fs.statSync(out).size };
+  };
+  const job = exportQueue.then(run, run);
+  exportQueue = job.catch(() => {});
+  return job;
+}
+
 /* ---- Chat state and the Claude Code session --------------------------------------------- */
 const CHAT_FILE = path.join(STATE_DIR, "chat.json");
 const state = {
@@ -337,7 +366,7 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
 /* ---- File watching -------------------------------------------------------------------------- */
 let changed = new Set(), flush = null, eidTimer = null;
 fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
-  if (!file || /(^|\/)\.|\.bak$|~$/.test(file)) return;
+  if (!file || /(^|\/)\.|\.bak$|~$|^export[\/]/.test(file)) return;
   changed.add(file.split(path.sep).join("/"));
   clearTimeout(flush);
   flush = setTimeout(() => {
@@ -399,6 +428,7 @@ function undo(res) {
 /* ---- HTTP ------------------------------------------------------------------------------------- */
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
 
+
 function serveFile(res, file, transform) {
   fs.readFile(file, (err, data) => {
     if (err) return text(res, 404, "Not found");
@@ -419,6 +449,13 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(path.join(EDITOR_DIR, "public"), p.slice(8));
       return f ? serveFile(res, f) : text(res, 403, "Forbidden");
     }
+    let snap;
+    if (req.method === "GET" && (snap = p.match(/^\/deck\/__pindeck-print-([\w-]+)\.html$/))) {
+      const html = snapshots.get(snap[1]);
+      if (!html) return text(res, 404, "Not found");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      return res.end(html);
+    }
     if (req.method === "GET" && p.startsWith("/deck/")) {
       const f = safeJoin(DECK_DIR, p.slice(6) || DECK_FILE);
       if (!f) return text(res, 403, "Forbidden");
@@ -426,7 +463,8 @@ const server = http.createServer(async (req, res) => {
       if (!mode || !f.endsWith(".html")) return serveFile(res, f);
       return serveFile(res, f, (s) => {
         // headless runs must not stream media, or Chrome never finishes the page
-        if (mode === "shot" || mode === "dump") s = s.replace(/\bpreload="(auto|metadata)"/g, 'preload="none"');
+        if (mode === "shot" || mode === "dump" || mode === "pdf") s = s.replace(/\bpreload="(auto|metadata)"/g, 'preload="none"');
+        if (mode === "pdf") return s.replace(/<\/head>/i, PDF_HEAD_TAG).replace(/<\/body>/i, PDF_PAGE_TAG);
         return s.replace(/<\/body>/i, BRIDGE_TAG);
       });
     }
@@ -575,7 +613,19 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId });
     }
 
+    if (p === "/api/export" && req.method === "POST") {
+      const b = await body(req);
+      try { return json(res, 200, await exportPdf(b.kind)); }
+      catch (e) { return json(res, 500, { error: String(e.message || e) }); }
+    }
+
     // CLI endpoints (used by Claude Code via cli.mjs)
+    if (p === "/api/pdf") {
+      const kind = url.searchParams.get("slide") || url.searchParams.get("kind") || "handout";
+      if (!["handout", "presentation"].includes(kind)) return text(res, 400, 'Use "handout" or "presentation".');
+      const r = await exportPdf(kind);
+      return text(res, 200, r.path);
+    }
     if (p === "/api/slides") {
       return text(res, 200, slideList().map((s) => `${String(s.index + 1).padStart(2)}  ${s.eid}`).join("\n"));
     }

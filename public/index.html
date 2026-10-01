@@ -35,6 +35,15 @@
           <button id="pin-toggle" class="toggle" title="Pin (P): click elements to pin them for Claude, Esc to stop" aria-pressed="false">
             <span class="dot">1</span> Pin <kbd>P</kbd></button>
         </span>
+        <span class="menu-wrap">
+          <button id="export-btn" aria-haspopup="menu" aria-expanded="false" title="Export the deck as a PDF">Export ▾</button>
+          <div id="export-menu" class="menu" role="menu" hidden>
+            <button role="menuitem" data-export="handout"><strong>Handout PDF</strong>
+              <span>One page per slide, build steps shown complete</span></button>
+            <button role="menuitem" data-export="presentation"><strong>Presentation PDF</strong>
+              <span>One page per click: a slide with two build steps gives three pages</span></button>
+          </div>
+        </span>
         <button id="present" title="Open the deck in a new tab to present">Present ↗</button>
       </div>
     </div>
