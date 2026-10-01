@@ -102,6 +102,22 @@ window.__editorHost = {
       loadMain();   // re-render: math, footer numbers, and the file as saved
     });
   },
+  commitSplit(op, done) {
+    editChain = editChain.then(async () => {
+      const res = await api("split", op);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d.error || "Could not add the bullet."); loadMain(); return; }
+      done?.(d.eid);
+    });
+  },
+  commitRemove(eid) {
+    editChain = editChain.then(async () => {
+      const res = await api("remove", { eid });
+      if (!res.ok) toast((await res.json().catch(() => ({}))).error || "Could not remove the bullet.");
+      loadMain();
+    });
+  },
+  refresh() { editChain = editChain.then(() => loadMain()); },
   editingChanged(on) { state.editing = on; },
   toast(msg) { toast(msg); },
 };

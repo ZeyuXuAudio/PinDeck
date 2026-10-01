@@ -331,3 +331,46 @@ export function setInner(html, eid, path, inner) {
   if (old === inner) return { html, changed: false };
   return { html: html.slice(0, node.contentStart) + inner + html.slice(node.closeStart), changed: true };
 }
+
+/* ---- New bullets (Enter in a list item) ------------------------------------------------------ */
+
+const allEids = (html) => {
+  const ids = new Set();
+  walk(parse(html), (c) => { const v = c.attrs?.["data-eid"]?.value; if (v) ids.add(v); });
+  return ids;
+};
+const closeEnd = (html, node) => html.indexOf(">", node.closeStart) + 1;
+const lineIndent = (html, at) => {
+  const ls = html.lastIndexOf("\n", at - 1) + 1;
+  const pre = html.slice(ls, at);
+  return /^\s*$/.test(pre) ? pre : "";
+};
+
+/* Inserts <tag class=...>inner</tag> right after the element `eid`, on its own line with the same
+   indentation. The new element gets `newEid`, or a free variant of it. Returns { html, eid }. */
+export function insertAfter(html, eid, { tag = "li", cls = "", inner = "", newEid }) {
+  const node = nodeAt(html, eid);
+  if (!node) return null;
+  const used = allEids(html);
+  let id = newEid || `${eid}-next`, k = 2;
+  const base = id.replace(/-\d+$/, "");
+  while (used.has(id)) id = `${base}-${k++}`;
+  const end = closeEnd(html, node);
+  const indent = lineIndent(html, node.start);
+  const attrs = (cls ? ` class="${cls.replace(/"/g, "")}"` : "") + ` data-eid="${id}"`;
+  const el = `${indent ? "\n" + indent : ""}<${tag}${attrs}>${inner}</${tag}>`;
+  return { html: html.slice(0, end) + el + html.slice(end), eid: id };
+}
+
+/* Removes the element `eid`, and its line if nothing else is on it. Returns the new html or null. */
+export function removeElement(html, eid) {
+  const node = nodeAt(html, eid);
+  if (!node) return null;
+  let a = node.start, b = closeEnd(html, node);
+  const indent = lineIndent(html, a);
+  if (indent || html[a - 1] === "\n") {
+    const rest = html.slice(b).match(/^[ \t]*(?=\n|$)/);
+    if (rest) { a -= indent.length; b += rest[0].length; if (html[a - 1] === "\n") a--; }
+  }
+  return html.slice(0, a) + html.slice(b);
+}

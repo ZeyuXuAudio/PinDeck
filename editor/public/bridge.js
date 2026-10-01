@@ -551,8 +551,10 @@
   /* ---- Text editing ------------------------------------------------------------------------------
      Double-click (or Enter on a selection) edits the element in place. While editing, the element
      shows its source HTML, so math appears as TeX (\( ... \)) and is saved exactly as typed.
-     Enter or a click elsewhere saves, Esc cancels, Shift+Enter adds a line break, ⌘B / ⌘I format. */
-  let editing = null;
+     Enter or a click elsewhere saves, Esc cancels, Shift+Enter adds a line break, ⌘B / ⌘I format.
+     In a bullet, Enter splits it at the caret and continues in a new bullet; Enter on an empty new
+     bullet removes it and stops. */
+  let editing = null, chainDirty = false;   // chainDirty: bullets were split; re-render when editing stops
   const TEXT_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "dt", "dd", "td", "th", "caption",
     "figcaption", "blockquote", "pre", "button", "span", "small", "label"]);
   const hasOwnText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim());
@@ -587,10 +589,10 @@
     return true;
   }
 
-  async function startEdit(t, x, y) {
+  async function startEdit(t, x, y, opts = {}) {
     if (!editable) return host()?.toast("Claude is working. Editing resumes when it has finished.");
     if (editing) await finishEdit(true);
-    const src = await host()?.textSource(t.eid, t.path);
+    const src = opts.src ?? await host()?.textSource(t.eid, t.path);
     if (src == null || !t.el.isConnected) return;
     const el = t.el;
     if (!sel || sel.el !== el) select(el.dataset.eid ? el : null, t.sec);
@@ -599,6 +601,7 @@
     editing = { ...t, rendered: el.innerHTML };
     el.innerHTML = src;
     editing.baseline = el.innerHTML;
+    if (!el.textContent.trim() && !el.querySelector("img, svg, br")) el.appendChild(document.createElement("br"));   // room for the caret
     editing.orig = new WeakSet(el.querySelectorAll("*"));
     el.contentEditable = "true";
     el.spellcheck = true;
@@ -608,11 +611,11 @@
     el.addEventListener("paste", onEditPaste);
     el.addEventListener("blur", onEditBlur);
     el.focus({ preventScroll: true });
-    placeCaret(el, x, y);
+    placeCaret(el, x, y, opts.caret);
     showEditHint(true);
     host()?.editingChanged(true);
   }
-  function placeCaret(el, x, y) {
+  function placeCaret(el, x, y, where) {
     const s = getSelection();
     let r = null;
     if (x != null) {
@@ -622,7 +625,7 @@
         if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); }
       }
     }
-    if (!r || !el.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(el); r.collapse(false); }
+    if (!r || !el.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(el); r.collapse(where === "start"); }
     s.removeAllRanges();
     s.addRange(r);
   }
@@ -640,7 +643,10 @@
   function onEditKey(e) {
     e.stopPropagation();   // keep Reveal and the editor shortcuts out of typing
     if (e.key === "Escape") { e.preventDefault(); finishEdit(false); }
-    else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finishEdit(true); }
+    else if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (editing?.el.tagName === "LI" && !editing.path.length) splitBullet(); else finishEdit(true);
+    }
     else if (e.key === "Enter") { e.preventDefault(); document.execCommand("insertLineBreak"); }
   }
   function onEditPaste(e) {
@@ -670,10 +676,7 @@
     el.normalize();
     return el.innerHTML.replace(/\u00a0/g, "&nbsp;");
   }
-  async function finishEdit(save) {
-    if (!editing) return;
-    const ed = editing;
-    editing = null;
+  function teardownEdit(ed) {
     const el = ed.el;
     el.removeEventListener("keydown", onEditKey);
     el.removeEventListener("paste", onEditPaste);
@@ -682,16 +685,86 @@
     el.removeAttribute("spellcheck");
     el.classList.remove("__editing");
     showEditHint(false);
+  }
+  const isBlank = (el) => !el.textContent.trim() && !el.querySelector("img, svg, video, canvas");
+
+  async function finishEdit(save) {
+    if (!editing) return;
+    const ed = editing;
+    editing = null;
+    const el = ed.el;
+    el.removeEventListener("blur", onEditBlur);   // removing the element below would blur it again
+    teardownEdit(ed);
     getSelection().removeAllRanges();
-    const html = save ? cleanEdited(el, ed.orig) : null;
     host()?.editingChanged(false);
-    if (!save || html === ed.baseline) {
-      el.innerHTML = ed.rendered;   // back to the rendered version (math as KaTeX)
-      if (sel) drawSel();
+    const eid = ed.path.length ? ed.eid : el.dataset.eid || ed.eid;
+    if (!save) el.innerHTML = ed.rendered;   // Esc: back to the content before this edit
+    // a new bullet left empty is removed again
+    if (ed.isNew && isBlank(el)) {
+      el.remove();
+      if (sel?.el === el) select(null, null);
+      host()?.commitRemove(eid);
+      chainDirty = false;
       return;
     }
+    const html = save ? cleanEdited(el, ed.orig) : null;
+    if (!save || html === ed.baseline) {
+      el.innerHTML = ed.rendered;   // back to the rendered version (math as KaTeX)
+      if (chainDirty) { chainDirty = false; host()?.refresh(); }
+      else if (sel) drawSel();
+      return;
+    }
+    chainDirty = false;
     const label = `Edited text of ${ed.path.length ? `${nameOf(el.parentElement, ed.sec)} cell ${ed.path[0] + 1}` : nameOf(el, ed.sec)}`;
-    host()?.commitText({ eid: ed.eid, path: ed.path, html, label, text: textOf(el).slice(0, 300) });
+    host()?.commitText({ eid, path: ed.path, html, label, text: textOf(el).slice(0, 300) });
+  }
+
+  /* A free id for a new bullet on the same slide ("summary/li-4"); the server double-checks. */
+  function newBulletEid(el) {
+    const prefix = el.closest("section").dataset.eid;
+    const used = new Set([...document.querySelectorAll("[data-eid]")].map((e) => e.dataset.eid));
+    let id = `${prefix}/li`, k = 2;
+    while (used.has(id)) id = `${prefix}/li-${k++}`;
+    return id;
+  }
+  function splitBullet() {
+    const ed = editing, el = ed.el, s = getSelection();
+    if (!s.rangeCount) return finishEdit(true);
+    const r = s.getRangeAt(0);
+    if (!r.collapsed) r.deleteContents();
+    if (ed.isNew && isBlank(el)) return finishEdit(true);   // Enter on an empty new bullet: done
+    // everything from the caret to the end of this bullet's own text (a sub-list stays where it is)
+    const tail = document.createRange();
+    tail.setStart(r.startContainer, r.startOffset);
+    const subList = [...el.children].find((c) => c.tagName === "UL" || c.tagName === "OL");
+    if (subList) tail.setEndBefore(subList); else tail.setEnd(el, el.childNodes.length);
+    const frag = tail.extractContents();
+    const li = document.createElement("li");
+    const cls = [...el.classList].filter((c) => !c.startsWith("__") && c !== "visible" && c !== "current-fragment").join(" ");
+    if (cls) li.className = cls;
+    li.appendChild(frag);
+    el.after(li);
+    // no stray spaces at the split
+    const trim = (node, end) => {
+      const w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const all = [];
+      while (w.nextNode()) all.push(w.currentNode);
+      const t = end ? all.at(-1) : all[0];
+      if (t) t.nodeValue = end ? t.nodeValue.replace(/\s+$/, "") : t.nodeValue.replace(/^\s+/, "");
+    };
+    if (!subList) trim(el, true);
+    trim(li, false);
+    const html = cleanEdited(el, ed.orig);
+    const newHtml = cleanEdited(li, ed.orig);
+    const newEid = newBulletEid(el);
+    li.dataset.eid = newEid;
+    editing = null;
+    teardownEdit(ed);
+    host()?.editingChanged(false);
+    chainDirty = true;
+    host()?.commitSplit({ eid: ed.eid, html, newHtml, newEid, cls, text: textOf(el).slice(0, 200) },
+      (real) => { if (real && real !== newEid) li.dataset.eid = real; });
+    startEdit({ el: li, sec: ed.sec, eid: newEid, path: [], isNew: true }, null, null, { src: newHtml, caret: "start" });
   }
 
   /* ---- Stylesheet hot swap (no reload, no flicker) -------------------------------------------- */

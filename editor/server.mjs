@@ -18,7 +18,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -561,6 +561,30 @@ const server = http.createServer(async (req, res) => {
       const where = b.eid + (b.path?.length ? ` (cell ${b.path.map((i) => i + 1).join("/")})` : "");
       const turnId = recordHandEdit(before, r.html, label,
         `The user edited the text of ${where} by hand. It now reads: "${String(b.text || "").slice(0, 300)}".`);
+      return json(res, 200, { turnId });
+    }
+
+    // Enter in a bullet: the bullet keeps the text before the caret, a new bullet after it gets the rest
+    if (p === "/api/split" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const r1 = setInner(before[DECK_FILE], b.eid, [], String(b.html ?? ""));
+      if (!r1) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
+      const r2 = insertAfter(r1.html, b.eid, { tag: "li", cls: b.cls || "", inner: String(b.newHtml ?? ""), newEid: b.newEid });
+      const short = (e) => e.replace(/^[^/]+\//, "/");
+      const turnId = recordHandEdit(before, r2.html, `New bullet after ${short(b.eid)}`,
+        `The user added a bullet (${r2.eid}) after ${b.eid} by pressing Enter while editing; ${b.eid} now reads "${String(b.text || "").slice(0, 200)}".`);
+      return json(res, 200, { turnId, eid: r2.eid });
+    }
+    if (p === "/api/remove" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const html = removeElement(before[DECK_FILE], b.eid);
+      if (html == null) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
+      const turnId = recordHandEdit(before, html, `Removed empty bullet ${b.eid.replace(/^[^/]+\//, "/")}`,
+        `The user removed the empty bullet ${b.eid}.`);
       return json(res, 200, { turnId });
     }
 

@@ -25,7 +25,7 @@ screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), no
 | Action | How |
 |---|---|
 | Select, move, resize | Select mode (`V`, the default): click an element to select it, drag to move, pull a handle to resize. Elements snap to the slide edges and centre, the footer rule and other elements (pink guides); hold `Alt` to turn snapping off, `Shift` to move along one axis. Images keep their aspect ratio (`Shift` toggles). Arrow keys nudge by 1 px, `Shift`+arrows by 10 px. |
-| Edit text | Double-click the text (or select it and press `Enter`). The element shows its source, so math appears as TeX, e.g. `\(\mu=0.5\)`. `Enter` or a click elsewhere saves, `Esc` cancels, `Shift+Enter` adds a line break, `⌘B` / `⌘I` make text bold or italic. Pasted text arrives as plain text. Table cells are edited one at a time. |
+| Edit text | Double-click the text (or select it and press `Enter`). The element shows its source, so math appears as TeX, e.g. `\(\mu=0.5\)`. `Enter` or a click elsewhere saves, `Esc` cancels, `Shift+Enter` adds a line break, `⌘B` / `⌘I` make text bold or italic. In a bullet, `Enter` splits it at the cursor and continues in a new bullet below; `Enter` on an empty new bullet removes it and stops. Pasted text arrives as plain text. Table cells are edited one at a time. |
 | Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and Claude's changes. |
 | Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
 | Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". The selected element is sent too, so "make this smaller" works. `Enter` sends, `Shift+Enter` adds a new line. |
@@ -83,10 +83,11 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.2
+## Limits of version 1.3
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
-* `Enter` saves instead of starting a new bullet; ask Claude for new bullets or slides.
+* No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
+  not merge it with the one above; ask Claude for those.
 * Parts of an inline SVG move with the whole SVG; inline text (bold, spans) moves with its block.
 * Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to
   turn hand edits into proper CSS when a layout should really change.
@@ -95,6 +96,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.3**: `Enter` in a bullet starts a new bullet (split at the cursor); empty new bullets
+  are removed again.
 * **1.2**: text editing on the slide (double-click or Enter), with math as TeX, table cells,
   bold and italic, plain-text paste; text edits are part of the undo history and reported to Claude.
 * **1.1**: select, drag, resize and nudge with snapping guides; one undo/redo history for hand
