@@ -24,6 +24,14 @@ Every slide <section> and visible element has a data-eid attribute ("summary", "
 - When you add a slide, give the <section> a new id (a slug of its title) and prefix its elements.
 - The editor adds missing ids after your turn, so a forgotten one is not fatal.
 
+## Attached files
+The user can attach figures and audio to a message. PinDeck has already saved them in the deck's
+`figures/` folder; <editor-context> lists their paths (relative to index.html), size and, for audio,
+the duration and a generated waveform SVG. If a file was dropped onto a slide, the drop position is
+given too. Put them on slides with the deck's existing patterns: a figure like the other `figure.fig`
+blocks, audio like the deck's audio demo (audio element, play button, waveform). Read an image to
+see what it shows before you write a caption. Do not rename or move the files.
+
 ## Checking your work
 The browser reloads by itself when you save. After changing positions, sizes, fonts or content
 amount, check the result:

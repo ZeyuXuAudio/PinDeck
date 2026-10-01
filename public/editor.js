@@ -119,6 +119,8 @@ window.__editorHost = {
   },
   refresh() { editChain = editChain.then(() => loadMain()); },
   editingChanged(on) { state.editing = on; },
+  dropFiles(files, at) { attachFiles(files, at); },
+  dragOver(on) { $("drop-hint").hidden = !on; },
   toast(msg) { toast(msg); },
 };
 
@@ -331,10 +333,11 @@ function md(s) {
 function entryHtml(e) {
   switch (e.kind) {
     case "user":
-      return `${esc(e.text)}${e.pins?.length || e.screenshot || e.selection ? `<div class="chips">${e.selection ?
+      return `${esc(e.text)}${e.pins?.length || e.screenshot || e.selection || e.attachments?.length ? `<div class="chips">${e.selection ?
         `<span class="chip sel" title="${esc(e.selection.eid)}"><span class="n">▢</span> S${e.selection.slide} · ${esc(e.selection.label)}</span>` : ""}${(e.pins || []).map((p) =>
         `<span class="chip" title="${esc(p.eid)}"><span class="n">${p.n}</span> S${p.slide} · ${esc(p.label || p.eid)}</span>`).join("")}${
-        e.screenshot ? '<span class="chip">📷 screenshot</span>' : ""}</div>` : ""}`;
+        e.screenshot ? '<span class="chip">📷 screenshot</span>' : ""}${(e.attachments || []).map((a) =>
+        `<span class="chip att-chip" title="${esc(a.path)}">${a.kind === "image" ? `<img src="/deck/${esc(a.path)}" alt="">` : "🔊"} ${esc(a.path.split("/").pop())}</span>`).join("")}</div>` : ""}`;
     case "assistant": return md(e.text);
     case "tool":
       return `<span><span class="tn">${esc(e.name)}</span> ${esc(e.detail || "")}${e.error ? `<span class="err">${esc(e.error)}</span>` : ""}</span>`;
@@ -417,6 +420,7 @@ function setBusy(busy) {
 async function send() {
   const text = $("input").value.trim();
   if (!text || state.busy) return;
+  if (attachments.some((a) => a.status === "uploading")) return toast("Wait until the attachments have finished uploading.");
   $("send").disabled = true;
   try {
     // measure every pinned slide plus the current one, in the user's own browser
@@ -428,12 +432,15 @@ async function send() {
     const s = state.slides[state.current];
     const res = await api("message", {
       text, pins: state.pins, selection: state.sel, layouts, screenshot: $("shot").checked,
+      attachments: attachments.filter((a) => a.status === "ready").map(({ path, kind, name, bytes, width, height, duration,
+        sampleRate, channels, waveform, droppedAt }) => ({ path, kind, name, bytes, width, height, duration, sampleRate, channels, waveform, droppedAt })),
       current: s ? { index: state.current, eid: s.eid } : null,
     });
     if (!res.ok) { alert((await res.json()).error || "Could not send."); return; }
     $("input").value = "";
     autosize();
     $("shot").checked = false;
+    clearAttachments();
     state.pins = [];
     pinsChanged();
     if (state.mode === "pin") setMode("select");
@@ -544,6 +551,133 @@ function connect() {
     try { if ((await api("ping")).status === 403) location.reload(); } catch {}
   };
 }
+
+/* ---- Attachments: figures and audio for the next message -------------------------------------------
+   Files are uploaded at once into <deck>/figures/. Images get their pixel size, audio its duration and a
+   waveform SVG (bars, viewBox 1000 x 120, like the template's audio player), all computed here in the
+   browser. Removing an attachment before sending deletes the uploaded file again. */
+let attachments = [], attachSeq = 0;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif)$/i, AUDIO_EXT = /\.(wav|mp3|ogg|oga|m4a|aac|flac|opus)$/i;
+const kindOf = (f) => (f.type.startsWith("image/") || IMAGE_EXT.test(f.name) ? "image"
+  : f.type.startsWith("audio/") || AUDIO_EXT.test(f.name) ? "audio" : null);
+const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
+
+async function uploadBlob(blob, name) {
+  const res = await fetch("/api/upload", { method: "POST", body: blob,
+    headers: { "x-editor-token": TOKEN, "x-filename": encodeURIComponent(name), "content-type": blob.type || "application/octet-stream" } });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || `Could not upload ${name}.`);
+  return d;
+}
+function imageSize(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth ? { width: img.naturalWidth, height: img.naturalHeight } : {});
+    img.onerror = () => resolve({});
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function audioInfo(file) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const audio = await ctx.decodeAudioData(await file.arrayBuffer());
+    ctx.close();
+    const n = 220, W = 1000, H = 120, len = audio.length;
+    const chans = [...Array(audio.numberOfChannels)].map((_, c) => audio.getChannelData(c));
+    const peaks = [];
+    for (let i = 0; i < n; i++) {
+      let m = 0;
+      const a = Math.floor((i * len) / n), b = Math.floor(((i + 1) * len) / n);
+      for (const ch of chans) for (let j = a; j < b; j += 4) m = Math.max(m, Math.abs(ch[j]));
+      peaks.push(m);
+    }
+    const top = Math.max(...peaks) || 1;
+    const bars = peaks.map((p, i) => {
+      const h = Math.max(3, (p / top) * (H - 10));
+      return `<rect x="${(i * W / n + 1.2).toFixed(1)}" y="${((H - h) / 2).toFixed(1)}" width="${(W / n - 2.4).toFixed(1)}" height="${h.toFixed(1)}" rx="2"/>`;
+    }).join("");
+    return { meta: { duration: audio.duration, sampleRate: audio.sampleRate, channels: audio.numberOfChannels },
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><g fill="#6B7785">${bars}</g></svg>` };
+  } catch {
+    return { meta: {}, svg: null };   // a format the browser cannot decode: attach it without waveform
+  }
+}
+async function attachFile(file, droppedAt) {
+  const name = file.name && file.name !== "image.png" ? file.name : `pasted-image-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
+  const kind = kindOf({ type: file.type || "", name });
+  if (!kind) return toast(`${file.name || "This file"} is not an image or audio file.`);
+  const a = { id: ++attachSeq, name, kind, status: "uploading", bytes: file.size, droppedAt,
+    preview: kind === "image" ? URL.createObjectURL(file) : null };
+  attachments.push(a);
+  renderAttachments();
+  try {
+    let wave = null;
+    if (kind === "image") Object.assign(a, await imageSize(file));
+    else { const info = await audioInfo(file); Object.assign(a, info.meta); wave = info.svg; }
+    Object.assign(a, await uploadBlob(file, name));
+    if (wave) {
+      const w = await uploadBlob(new Blob([wave], { type: "image/svg+xml" }), a.path.split("/").pop().replace(/\.[^.]+$/, "") + "-wave.svg");
+      a.waveform = w.path;
+    }
+    a.status = attachments.includes(a) ? "ready" : "removed";
+    if (a.status === "removed") api("upload-remove", { path: a.path, waveform: a.waveform });   // removed while uploading
+  } catch (err) {
+    a.status = "error";
+    a.error = String(err.message || err);
+  }
+  renderAttachments();
+}
+function attachFiles(files, droppedAt) { [...files].forEach((f) => attachFile(f, droppedAt)); }
+function removeAttachment(id) {
+  const a = attachments.find((x) => x.id === id);
+  if (!a) return;
+  attachments = attachments.filter((x) => x !== a);
+  if (a.status === "ready") api("upload-remove", { path: a.path, waveform: a.waveform });
+  if (a.preview) URL.revokeObjectURL(a.preview);
+  renderAttachments();
+}
+function clearAttachments() {
+  attachments.forEach((a) => a.preview && URL.revokeObjectURL(a.preview));
+  attachments = [];
+  renderAttachments();
+}
+function renderAttachments() {
+  $("attach-tray").innerHTML = attachments.map((a) => {
+    const info = a.status === "uploading" ? "uploading…" : a.status === "error" ? a.error
+      : [a.kind === "image" && a.width ? `${a.width} × ${a.height}` : "", a.duration ? `${a.duration.toFixed(1)} s` : "",
+         fmtBytes(a.bytes), a.droppedAt ? `dropped on slide ${a.droppedAt.slide.index + 1}` : ""].filter(Boolean).join(" · ");
+    return `<span class="att ${a.status}" title="${esc(a.path || a.name)}">
+      ${a.kind === "image" ? `<img class="thumb" src="${a.preview || "/deck/" + esc(a.path)}" alt="">` : '<span class="icon-box">🔊</span>'}
+      <span class="meta"><b>${esc(a.path ? a.path.split("/").pop() : a.name)}</b><span>${esc(info)}</span></span>
+      ${a.status === "uploading" ? '<span class="spinner"></span>' : ""}
+      <button class="x" data-unattach="${a.id}" aria-label="Remove ${esc(a.name)}">×</button></span>`;
+  }).join("");
+}
+$("attach-tray").addEventListener("click", (e) => {
+  const x = e.target.closest("[data-unattach]");
+  if (x) removeAttachment(+x.dataset.unattach);
+});
+$("attach").onclick = () => $("file-input").click();
+$("file-input").onchange = () => { attachFiles($("file-input").files); $("file-input").value = ""; };
+$("input").addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  attachFiles(files);
+});
+// drag and drop onto the chat (the slide frame forwards its own drops through the bridge)
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", (e) => { if (hasFiles(e)) { dragDepth++; $("drop-hint").hidden = false; } });
+document.addEventListener("dragleave", (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $("drop-hint").hidden = true; } });
+document.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+document.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();   // never let the browser open the file instead
+  dragDepth = 0;
+  $("drop-hint").hidden = true;
+  attachFiles(e.dataTransfer.files);
+});
 
 /* ---- Start ------------------------------------------------------------------------------------------- */
 loadMain();

@@ -67,15 +67,20 @@
           <em>“1: align with 2, make 3 smaller”</em>.</p>
         <p>Or edit yourself: click to select, drag to move, pull a handle to resize, arrow keys to nudge,
           double-click to change the text. A selected element is what Claude takes “this” to mean.</p>
+        <p>Attach figures or audio with 📎, drag and drop or paste; Claude can put them on a slide.</p>
         <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
           <code>brand.css</code> is locked.</p>
       </div>
     </div>
+    <div id="drop-hint" class="drop-hint" hidden><div>Drop figures or audio to attach them</div></div>
     <div id="working" class="working" hidden><span class="spinner"></span> <span id="working-text">Claude is working…</span></div>
     <div class="composer">
       <div id="pin-tray" class="pin-tray"></div>
+      <div id="attach-tray" class="attach-tray"></div>
       <textarea id="input" rows="3" placeholder="Ask Claude… refer to pins by number (1, 2, …)"></textarea>
       <div class="composer-row">
+        <button id="attach" class="icon" title="Attach a figure or audio file (or drop it on the chat or a slide, or paste an image)" aria-label="Attach a file">📎</button>
+        <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg" hidden>
         <label class="check" title="Attach a screenshot of the current slide with the pin markers (for visual questions)">
           <input type="checkbox" id="shot"> Include screenshot</label>
         <span class="spacer"></span>

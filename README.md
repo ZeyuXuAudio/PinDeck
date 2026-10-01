@@ -44,6 +44,7 @@ Without them PinDeck runs no footer check and locks only `.slide-foot` and `.log
 | Visual questions | Tick "Include screenshot" to attach the current slide with the pin markers. |
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
+| Attach figures and audio | 📎 in the chat, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
@@ -97,7 +98,7 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.5
+## Limits of version 1.6
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
@@ -110,6 +111,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.6**: attach figures and audio to chat messages (file picker, drag and drop, paste); audio gets a
+  waveform SVG; files dropped on a slide carry their position.
 * **1.5**: PDF export (handout and presentation with build steps on separate pages).
 * **1.4**: decks describe their footer and locked brand elements with `<meta name="pindeck:...">`
   tags; the layout check ignores invisible elements. New public example deck: `ocean-example/`.

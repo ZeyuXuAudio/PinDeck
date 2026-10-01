@@ -72,6 +72,26 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .seg button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 #select-toggle[aria-pressed="true"] { background: #1a73e8; border-color: #1a73e8; }
 .ic { width: 13px; height: 13px; fill: currentColor; }
+.attach-tray:empty { display: none; }
+.attach-tray { display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto; }
+.att { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 3px 4px 3px 3px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; font-size: 12px; }
+.att .thumb { width: 34px; height: 34px; border-radius: 5px; object-fit: cover; background: var(--bg); flex: none; }
+.att .icon-box { width: 34px; height: 34px; border-radius: 5px; background: var(--orange-soft); display: grid; place-items: center; font-size: 17px; flex: none; }
+.att .meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.att .meta b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.att .meta span { color: var(--muted); }
+.att.error { border-color: var(--danger); }
+.att.error .meta span { color: var(--danger); }
+.att .x { border: 0; background: none; padding: 0 3px; color: var(--muted); font-size: 15px; line-height: 1; }
+.att .x:hover { color: var(--danger); }
+.att .spinner { width: 14px; height: 14px; }
+.chat-pane { position: relative; }
+.drop-hint { position: absolute; inset: 44px 0 0 0; z-index: 10; display: grid; place-items: center; pointer-events: none;
+  background: rgba(237,140,1,.08); border: 2px dashed var(--orange); border-radius: 10px; margin: 8px; }
+.drop-hint div { background: var(--orange); color: #fff; font-weight: 600; padding: 8px 14px; border-radius: 8px; }
+.msg.user .chips .att-chip { display: inline-flex; align-items: center; gap: 5px; }
+.msg.user .chips .att-chip img { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
 .menu-wrap { position: relative; }
 .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 300px; padding: 6px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.16); }

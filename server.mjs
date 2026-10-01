@@ -9,6 +9,7 @@
    - snapshots files around every Claude turn for diffs and undo
    - answers `cli.mjs layout|shot|slides|pdf` for Claude's self-checks and exports
    - exports the deck as a PDF handout or a PDF presentation (build steps on separate pages)
+   - stores figures and audio attached to chat messages in <deck>/figures/ for Claude to use
    Listens on 127.0.0.1 only; every API call needs the per-run token.
    Runtime files (chat, screenshots, backups) live in ~/.pindeck, never in the deck or the package. */
 
@@ -224,6 +225,7 @@ const CHAT_FILE = path.join(STATE_DIR, "chat.json");
 const state = {
   chat: [], seq: 0, busy: false, model: MODEL || null, sessionId: null,
   turns: [], redo: [], turn: null, notes: [], pins: [], current: null,
+  uploads: new Set(),   // files uploaded for the next message; removable until it is sent
 };
 try {
   const saved = JSON.parse(fs.readFileSync(CHAT_FILE, "utf8"));
@@ -277,7 +279,7 @@ function toolSummary(name, input = {}) {
     case "Edit": case "MultiEdit": case "Write": return { name: "Edit", detail: base(input.file_path) };
     case "Bash": {
       const cmd = String(input.command || "");
-      const m = cmd.match(/cli\.mjs\s+(\w+)\s*(.*)$/);
+      const m = cmd.match(/cli\.mjs["']?\s+(\w+)\s*(.*)$/);
       return m ? { name: m[1] === "shot" ? "Screenshot" : m[1] === "layout" ? "Check layout" : m[1], detail: m[2].trim() }
                : { name: "Run", detail: cmd.slice(0, 80) };
     }
@@ -346,7 +348,38 @@ function finishTurn({ error, cost, duration, denials = [] }) {
   pushStatus();
 }
 
-function buildPrompt({ text: userText, pins = [], selection, layouts = [], current, screenshot }) {
+/* ---- Attachments: figures and audio added to a chat message -------------------------------------- */
+const ATTACH_TYPES = {
+  image: ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"],
+  audio: ["wav", "mp3", "ogg", "oga", "m4a", "aac", "flac", "opus"],
+};
+const ATTACH_MAX = 100 * 1024 * 1024;
+const attachKind = (name) => {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  return Object.keys(ATTACH_TYPES).find((k) => ATTACH_TYPES[k].includes(ext)) || null;
+};
+/* A clean, unused file name in figures/: "My Figure (2).PNG" -> "figures/my-figure-2.png" */
+function attachPath(original) {
+  const ext = path.extname(original).toLowerCase();
+  const base = path.basename(original, path.extname(original)).normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "file";
+  let rel = `figures/${base}${ext}`, k = 2;
+  while (fs.existsSync(path.join(DECK_DIR, rel))) rel = `figures/${base}-${k++}${ext}`;
+  return rel;
+}
+const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
+function formatAttachment(a) {
+  if (a.kind === "image")
+    return `- ${a.path}: image${a.width ? `, ${a.width} × ${a.height} px` : ""}, ${kb(a.bytes)}` +
+      (/\.(png|jpe?g|gif|webp)$/i.test(a.path) ? ". Read it to see it." : a.path.endsWith(".svg") ? " (SVG, readable as text)." : ".");
+  const meta = [a.duration ? `${a.duration.toFixed(1)} s` : "", a.sampleRate ? `${Math.round(a.sampleRate / 1000)} kHz` : "",
+    a.channels ? (a.channels === 1 ? "mono" : `${a.channels} channels`) : "", kb(a.bytes)].filter(Boolean).join(", ");
+  return `- ${a.path}: audio, ${meta}` + (a.waveform ? `; waveform image ${a.waveform} (bars, viewBox 1000 × 120) for an audio player with waveform.` : ".");
+}
+const formatDrop = (a) => (a.droppedAt?.slide ? ` Dropped onto slide ${a.droppedAt.slide.index + 1} (${a.droppedAt.slide.eid}) at ` +
+  `x=${a.droppedAt.point.x} y=${a.droppedAt.point.y}${a.droppedAt.eid ? `, over ${a.droppedAt.eid}` : ""}: probably where the user wants it.` : "");
+
+function buildPrompt({ text: userText, pins = [], selection, layouts = [], current, screenshot, attachments = [] }) {
   const ctx = [];
   if (current) ctx.push(`The user is looking at slide ${current.index + 1} (${current.eid}).`);
   if (state.notes.length) {
@@ -360,6 +393,8 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
   if (pins.length) ctx.push("Pins (numbered clicks; the user refers to them by number):\n" + pins.map(formatPin).join("\n"));
   for (const L of layouts) ctx.push("Layout:\n" + formatLayout(L));
   if (screenshot) ctx.push(`Screenshot of slide ${screenshot.slide} with the pin markers: ${screenshot.path} (Read it).`);
+  if (attachments.length) ctx.push("Attached files (the user added them to this message; they are saved in the deck folder, " +
+    "use these paths relative to index.html):\n" + attachments.map((a) => formatAttachment(a) + formatDrop(a)).join("\n"));
   return (ctx.length ? `<editor-context>\n${ctx.join("\n\n")}\n</editor-context>\n\n` : "") + userText;
 }
 
@@ -505,11 +540,43 @@ const server = http.createServer(async (req, res) => {
         catch (e) { addEntry({ kind: "notice", text: "Screenshot failed: " + e.message }); }
       }
       const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
+      // only files PinDeck itself stored can be attached
+      b.attachments = (b.attachments || []).filter((a) => a && state.uploads.has(a.path) && fs.existsSync(path.join(DECK_DIR, a.path)));
+      b.attachments.forEach((a) => { state.uploads.delete(a.path); if (a.waveform) state.uploads.delete(a.waveform); });
       const entry = addEntry({ kind: "user", text: b.text, screenshot: !!screenshot,
+        attachments: b.attachments.map((a) => ({ path: a.path, kind: a.kind, name: a.name })),
         selection: b.selection ? { eid: b.selection.eid, label: b.selection.eid.replace(/^[^/]+\//, ""), slide: b.selection.slide.index + 1 } : null,
         pins: (b.pins || []).map((p) => ({ n: p.n, eid: p.eid, label: label(p), slide: p.slide.index + 1 })) });
       startTurn(buildPrompt({ ...b, screenshot }), entry);
       return json(res, 200, { id: entry.id });
+    }
+    if (p === "/api/upload" && req.method === "POST") {
+      const original = decodeURIComponent(String(req.headers["x-filename"] || "file"));
+      const kind = attachKind(original);
+      if (!kind) return json(res, 415, { error: `Only images (${ATTACH_TYPES.image.join(", ")}) and audio (${ATTACH_TYPES.audio.join(", ")}) can be attached.` });
+      const chunks = [];
+      let size = 0;
+      for await (const c of req) {
+        size += c.length;
+        if (size > ATTACH_MAX) return json(res, 413, { error: `${original} is larger than ${kb(ATTACH_MAX)}.` });
+        chunks.push(c);
+      }
+      const buf = Buffer.concat(chunks);
+      const rel = attachPath(original);
+      fs.mkdirSync(path.join(DECK_DIR, "figures"), { recursive: true });
+      ourWrites.set(rel, { hash: hash(buf.toString("utf8")), manual: true });   // no slide reload for a new file
+      fs.writeFileSync(path.join(DECK_DIR, rel), buf);
+      state.uploads.add(rel);
+      return json(res, 200, { path: rel, kind, bytes: buf.length, url: `/deck/${rel}` });
+    }
+    if (p === "/api/upload-remove" && req.method === "POST") {
+      const b = await body(req);
+      for (const rel of [b.path, b.waveform].filter(Boolean)) {
+        if (!state.uploads.has(rel)) continue;   // only unsent uploads, never other deck files
+        state.uploads.delete(rel);
+        fs.rmSync(path.join(DECK_DIR, rel), { force: true });
+      }
+      return json(res, 200, {});
     }
     if (p === "/api/stop" && req.method === "POST") {
       if (state.busy && session.running) {

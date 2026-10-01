@@ -834,6 +834,23 @@
       document.addEventListener("click", onClick, true);
       document.addEventListener("mousemove", onMove, true);
       document.addEventListener("mouseleave", hideHover);
+      // files dropped onto a slide become chat attachments, with the drop position for Claude
+      const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+      document.addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); host()?.dragOver(true); } });
+      document.addEventListener("dragleave", (e) => { if (hasFiles(e) && !e.relatedTarget) host()?.dragOver(false); });
+      document.addEventListener("drop", (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        host()?.dragOver(false);
+        let at = null;
+        const t = targetOf(document.elementFromPoint(e.clientX, e.clientY));
+        if (t) {
+          const { r, s } = frame(t.sec);
+          at = { slide: slideInfo(t.sec), point: { x: r1((e.clientX - r.left) / s), y: r1((e.clientY - r.top) / s) },
+            eid: t.el !== t.sec ? t.el.dataset.eid : null };
+        }
+        host()?.dropFiles(e.dataTransfer.files, at);
+      });
       document.documentElement.addEventListener("pointermove", onDragMove);
       document.documentElement.addEventListener("pointerup", onDragEnd);
       document.documentElement.addEventListener("pointercancel", onDragEnd);
