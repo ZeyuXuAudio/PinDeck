@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="editor-token" content="%%TOKEN%%">
+  <title>PinDeck</title>
+  <link rel="stylesheet" href="/editor/editor.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Left: slides -->
+  <nav class="slides-pane" aria-label="Slides">
+    <div class="pane-head"><span class="brand"><span class="brand-pin" aria-hidden="true"></span>PinDeck</span> <span id="slide-count" class="muted"></span></div>
+    <ol id="slide-list" class="slide-list"></ol>
+  </nav>
+
+  <!-- Middle: canvas -->
+  <main class="canvas-pane">
+    <div class="toolbar">
+      <div class="group">
+        <button id="prev" class="icon" title="Previous slide (←)" aria-label="Previous slide">‹</button>
+        <span id="slide-pos" class="pos">– / –</span>
+        <button id="next" class="icon" title="Next slide (→)" aria-label="Next slide">›</button>
+        <span id="slide-title" class="slide-title"></span>
+      </div>
+      <div class="group">
+        <button id="pin-toggle" class="toggle" title="Pin mode (P): click elements to pin them, Esc to stop" aria-pressed="false">
+          <span class="dot">1</span> Pin <kbd>P</kbd></button>
+        <button id="present" title="Open the deck in a new tab to present">Present ↗</button>
+      </div>
+    </div>
+    <div id="pin-hint" class="pin-hint" hidden>Pin mode: click elements on the slide. Click a marker to remove it. <kbd>Esc</kbd> to stop.</div>
+    <div id="stage" class="stage"></div>
+  </main>
+
+  <!-- Right: chat with Claude -->
+  <aside class="chat-pane" aria-label="Claude">
+    <div class="pane-head chat-head">
+      <span>Claude <span id="model" class="muted"></span></span>
+      <span class="head-actions">
+        <span id="conn" class="conn" title="Claude Code session"></span>
+        <button id="new-chat" class="small" title="Start a new conversation">New chat</button>
+      </span>
+    </div>
+    <div id="chat" class="chat" aria-live="polite">
+      <div class="empty" id="chat-empty">
+        <p><strong>Pin, then ask.</strong></p>
+        <p>Press <kbd>P</kbd> and click elements on the slide. Each click gets a number. Then write what to change, e.g.
+          <em>“1: align with 2, make 3 smaller”</em>.</p>
+        <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
+          <code>brand.css</code> is locked.</p>
+      </div>
+    </div>
+    <div id="working" class="working" hidden><span class="spinner"></span> <span id="working-text">Claude is working…</span></div>
+    <div class="composer">
+      <div id="pin-tray" class="pin-tray"></div>
+      <textarea id="input" rows="3" placeholder="Ask Claude… refer to pins by number (1, 2, …)"></textarea>
+      <div class="composer-row">
+        <label class="check" title="Attach a screenshot of the current slide with the pin markers (for visual questions)">
+          <input type="checkbox" id="shot"> Include screenshot</label>
+        <span class="spacer"></span>
+        <button id="clear-pins" class="small" hidden>Clear pins</button>
+        <button id="send" class="primary">Send</button>
+        <button id="stop" class="danger" hidden>Stop</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<dialog id="diff-dialog" class="diff-dialog">
+  <div class="dialog-head"><span id="diff-title">Changes</span><button class="small" id="diff-close">Close</button></div>
+  <pre id="diff-body" class="diff"></pre>
+</dialog>
+
+<script type="module" src="/editor/editor.js"></script>
+</body>
+</html>

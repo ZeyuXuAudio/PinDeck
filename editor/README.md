@@ -1,0 +1,81 @@
+# PinDeck
+
+**Pin it. Say it. Done.** PinDeck is a local editor for HTML slide decks (reveal.js): the slides on
+the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
+pin them, write what to change, and Claude edits the HTML and CSS. The slide updates in place.
+
+It is built for reveal.js decks. `audiolabs-example` is the reference deck; its specifics (the
+locked `brand.css`, the footer rule at y = 647) are still built in and will move to a per-deck config.
+
+```bash
+npx pindeck path/to/deck        # once published on npm
+node editor/server.mjs audiolabs-example   # from this repository
+```
+
+Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `claude` CLI, signed in
+with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
+screenshots. PinDeck has no npm dependencies.
+
+Options: `--port 5180`, `--model <name>` (otherwise Claude Code's default model), `--help`. The deck
+folder defaults to the current folder and must contain `index.html`. Runtime files (chat history,
+screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), not in the deck.
+
+## Working with it
+
+| Action | How |
+|---|---|
+| Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
+| Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". `Enter` sends, `Shift+Enter` adds a new line. |
+| Visual questions | Tick "Include screenshot" to attach the current slide with the pin markers. |
+| Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
+| Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
+| Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
+
+You can also edit `index.html` or `theme.css` in any editor; the slide reloads, and Claude is told
+the files changed. CSS changes are swapped in without a reload.
+
+## How it works
+
+* **Element ids.** On start, the server gives every slide and every visible element a readable
+  `data-eid` attribute (`summary`, `summary/callout`, `summary/li-2`). Only the attribute is
+  inserted; the rest of the file stays as it was. A backup of the file before the first change is
+  kept in `~/.pindeck/decks/<deck>/backups/`. Ids survive edits, so pins, layout reports and Claude all name
+  the same element.
+* **Pins.** A pin records the element id, its box in slide coordinates (1280 x 720), the click
+  point, the clicked word and, in tables, the cell. Pins on the footer or logos are marked as
+  locked.
+* **Layout instead of screenshots.** With each message the editor measures the current slide and
+  every pinned slide in your browser: position and size of every element, font sizes, and issues
+  (content below the footer rule, outside the slide, overlaps, clipped text). Claude gets this as
+  text. To check its own work it runs `node ../editor/cli.mjs layout <slide>`. Screenshots are
+  only taken when you tick the box or Claude needs a visual judgement.
+* **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
+  running, so there is no start-up delay per message. It runs in the deck folder under your Claude
+  login, with `--append-system-prompt` from `lib/system-prompt.md`.
+* **Permissions.** Claude may read files, edit `index.html` and `theme.css`, and run the editor's
+  CLI. Nothing else, and in particular no edits to `brand.css`. If `brand.css` changes during a
+  turn anyway, the server restores it and says so in the chat.
+* **Undo.** The server keeps a copy of the editable files from before each turn. Undo restores
+  them and tells Claude on the next message.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
+| `cli.mjs` | `layout`, `shot` and `slides` commands for Claude (and for you). |
+| `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
+| `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
+| `lib/claude.mjs` | The long-running Claude Code process. |
+| `lib/system-prompt.md` | What Claude is told about the editor. |
+| `LICENSE` | MIT. |
+
+## Limits of version 1.0
+
+* No direct manipulation yet: dragging, resizing and text editing on the slide are the next step.
+* Undo covers Claude's changes, one turn at a time, newest first.
+* Headless Chrome on macOS can be slow to start; screenshots take about 1.5 s.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
