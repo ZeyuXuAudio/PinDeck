@@ -18,7 +18,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -78,9 +78,9 @@ const MIME = { html: "text/html; charset=utf-8", css: "text/css; charset=utf-8",
   mp4: "video/mp4", webm: "video/webm", pdf: "application/pdf", md: "text/plain; charset=utf-8" };
 const hash = (s) => crypto.createHash("sha1").update(s).digest("hex");
 const readDeck = (f) => { try { return fs.readFileSync(path.join(DECK_DIR, f), "utf8"); } catch { return null; } };
-const ourWrites = new Map(); // file -> hash of content we wrote, to tell our writes from others
-function writeDeck(f, content) {
-  ourWrites.set(f, hash(content));
+const ourWrites = new Map(); // file -> { hash, manual } of what we wrote, to tell our writes from others
+function writeDeck(f, content, manual = false) {
+  ourWrites.set(f, { hash: hash(content), manual });
   fs.writeFileSync(path.join(DECK_DIR, f), content);
 }
 const snapshot = (files) => Object.fromEntries(files.map((f) => [f, readDeck(f)]));
@@ -207,7 +207,7 @@ const measure = (slide) => measureInEditor(slide).catch(() => measureHeadless(sl
 const CHAT_FILE = path.join(STATE_DIR, "chat.json");
 const state = {
   chat: [], seq: 0, busy: false, model: MODEL || null, sessionId: null,
-  turns: [], turn: null, notes: [], pins: [], current: null,
+  turns: [], redo: [], turn: null, notes: [], pins: [], current: null,
 };
 try {
   const saved = JSON.parse(fs.readFileSync(CHAT_FILE, "utf8"));
@@ -223,8 +223,11 @@ function addEntry(entry) {
   saveChat();
   return entry;
 }
+const liveTurns = () => state.turns.filter((t) => !t.undone);
+const changeLabel = (t) => (t ? (t.kind === "manual" ? t.label : "Claude's change") : null);
 const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId,
-  running: session.running, deck: DECK_DIR, chrome: !!CHROME });
+  running: session.running, deck: DECK_DIR, chrome: !!CHROME,
+  undo: changeLabel(liveTurns().at(-1)), redo: changeLabel(state.redo.at(-1)) });
 const pushStatus = () => broadcast("status", status());
 
 const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md"), "utf8")
@@ -320,17 +323,24 @@ function finishTurn({ error, cost, duration, denials = [] }) {
     const d = unifiedDiff(turn.before[f] ?? "", after[f] ?? "", f);
     return { file: f, added: d.added, removed: d.removed };
   }).filter((f) => f.added || f.removed);
-  const t = { id: turn.id, before: turn.before, after, files, undone: false };
-  if (files.length) state.turns.push(t);
+  const t = { id: turn.id, kind: "claude", before: turn.before, after, files, undone: false };
+  if (files.length) { state.turns.push(t); state.redo = []; }
   addEntry({ kind: "turn", turnId: files.length ? t.id : null, files, error, cost, duration,
     denials, restored, newIds: eid.assigned.length });
   pushStatus();
 }
 
-function buildPrompt({ text: userText, pins = [], layouts = [], current, screenshot }) {
+function buildPrompt({ text: userText, pins = [], selection, layouts = [], current, screenshot }) {
   const ctx = [];
   if (current) ctx.push(`The user is looking at slide ${current.index + 1} (${current.eid}).`);
-  if (state.notes.length) { ctx.push(...state.notes.map((n) => "Note: " + n)); state.notes = []; }
+  if (state.notes.length) {
+    const notes = state.notes.slice(-15);
+    if (state.notes.length > notes.length) ctx.push(`Note: ${state.notes.length - notes.length} earlier changes are not listed; re-read the files.`);
+    ctx.push(...notes.map((n) => "Note: " + n));
+    state.notes = [];
+  }
+  if (selection) ctx.push(`Selected element (what "this" or "it" most likely refers to): ${selection.eid} (${selection.tag}), ` +
+    `box x=${selection.box.x} y=${selection.box.y} w=${selection.box.w} h=${selection.box.h} on slide ${selection.slide.index + 1}.`);
   if (pins.length) ctx.push("Pins (numbered clicks; the user refers to them by number):\n" + pins.map(formatPin).join("\n"));
   for (const L of layouts) ctx.push("Layout:\n" + formatLayout(L));
   if (screenshot) ctx.push(`Screenshot of slide ${screenshot.slide} with the pin markers: ${screenshot.path} (Read it).`);
@@ -346,10 +356,12 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
   flush = setTimeout(() => {
     const files = [...changed];
     changed = new Set();
-    let external = false;
+    let external = false, manual = true;
     for (const f of files) {
       const c = readDeck(f);
-      if (c != null && ourWrites.get(f) === hash(c)) continue;
+      const w = ourWrites.get(f);
+      if (c != null && w && w.hash === hash(c)) { if (!w.manual) manual = false; continue; }
+      manual = false;
       if (EDITABLE.includes(f) && !state.busy) external = true;
     }
     if (external) {
@@ -359,9 +371,28 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
       clearTimeout(eidTimer);
       eidTimer = setTimeout(() => { if (!state.busy) runEidPass(); }, 800);
     }
-    broadcast("files", { files });
+    // manual: only drag/resize writes, which the browser already shows; no reload of the visible slide
+    broadcast("files", { files, manual });
   }, 120);
 });
+
+/* ---- Undo (Claude's turns and hand edits share one history) ---------------------------------------- */
+function undo(res) {
+  if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
+  const t = liveTurns().at(-1);
+  if (!t) return json(res, 409, { error: "Nothing to undo." });
+  const edited = EDITABLE.some((f) => readDeck(f) !== t.after[f]);
+  for (const f of EDITABLE) if (t.before[f] != null && readDeck(f) !== t.before[f]) writeDeck(f, t.before[f]);
+  t.undone = true;
+  state.redo.push(t);
+  state.notes.push(t.kind === "manual"
+    ? `The user undid their hand edit (${t.label}); ${DECK_FILE} is back to the state before it.`
+    : `The user undid your change from turn ${t.id}; ${t.files.map((f) => f.file).join(" and ")} are back to the state before it. Re-read before editing.`);
+  broadcast("undone", { turnId: t.id, undone: true });
+  if (edited) addEntry({ kind: "notice", text: "Undone. Edits made after that change were reverted too." });
+  pushStatus();
+  return json(res, 200, {});
+}
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
@@ -435,6 +466,7 @@ const server = http.createServer(async (req, res) => {
       }
       const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
       const entry = addEntry({ kind: "user", text: b.text, screenshot: !!screenshot,
+        selection: b.selection ? { eid: b.selection.eid, label: b.selection.eid.replace(/^[^/]+\//, ""), slide: b.selection.slide.index + 1 } : null,
         pins: (b.pins || []).map((p) => ({ n: p.n, eid: p.eid, label: label(p), slide: p.slide.index + 1 })) });
       startTurn(buildPrompt({ ...b, screenshot }), entry);
       return json(res, 200, { id: entry.id });
@@ -448,7 +480,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/new-chat" && req.method === "POST") {
       session.stop();
-      Object.assign(state, { chat: [], sessionId: null, turns: [], turn: null, busy: false, notes: [] });
+      Object.assign(state, { chat: [], sessionId: null, turns: [], redo: [], turn: null, busy: false, notes: [] });
       saveChat();
       broadcast("reset", { chat: [] });
       ensureSession();
@@ -462,17 +494,49 @@ const server = http.createServer(async (req, res) => {
       return text(res, 200, EDITABLE.map((f) => unifiedDiff(t.before[f] ?? "", t.after[f] ?? "", f).text).filter(Boolean).join("\n\n"));
     }
     if ((m = p.match(/^\/api\/turn\/(\d+)\/undo$/)) && req.method === "POST") {
+      const t = liveTurns().at(-1);
+      if (t && t.id !== +m[1]) return json(res, 409, { error: "Only the most recent change can be undone." });
+      return undo(res);
+    }
+    if (p === "/api/undo" && req.method === "POST") return undo(res);
+    if (p === "/api/redo" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
-      const live = state.turns.filter((t) => !t.undone);
-      const t = live[live.length - 1];
-      if (!t || t.id !== +m[1]) return json(res, 409, { error: "Only the most recent change can be undone." });
-      const edited = EDITABLE.some((f) => readDeck(f) !== t.after[f]);
-      for (const f of EDITABLE) if (t.before[f] != null && readDeck(f) !== t.before[f]) writeDeck(f, t.before[f]);
-      t.undone = true;
-      state.notes.push(`The user undid your change from turn ${t.id}; ${t.files.map((f) => f.file).join(" and ")} are back to the state before it. Re-read before editing.`);
-      broadcast("undone", { turnId: t.id });
-      if (edited) addEntry({ kind: "notice", text: "Undone. Edits made after that change were reverted too." });
+      const t = state.redo.at(-1);
+      if (!t) return json(res, 409, { error: "Nothing to redo." });
+      if (EDITABLE.some((f) => (readDeck(f) ?? null) !== (t.before[f] ?? null))) {
+        state.redo = [];
+        pushStatus();
+        return json(res, 409, { error: "The files changed since the undo, so it cannot be redone." });
+      }
+      state.redo.pop();
+      for (const f of EDITABLE) if (t.after[f] != null) writeDeck(f, t.after[f]);
+      t.undone = false;
+      state.notes.push(t.kind === "manual" ? `The user redid their hand edit: ${t.label}.`
+        : `The user redid your change from turn ${t.id} after undoing it.`);
+      broadcast("undone", { turnId: t.id, undone: false });
+      pushStatus();
       return json(res, 200, {});
+    }
+
+    // Drag and resize: inline style changes from the editor
+    if (p === "/api/edit" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const r = setStyles(before[DECK_FILE], b.ops || []);
+      if (r.missing.length) return json(res, 404, { error: `No element ${r.missing.join(", ")} in ${DECK_FILE}.` });
+      if (!r.changed) return json(res, 200, { unchanged: true });
+      writeDeck(DECK_FILE, r.html, true);
+      const after = snapshot(EDITABLE);
+      const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
+      const t = { id: state.seq + 1, kind: "manual", label: String(b.label || "Edited layout").slice(0, 200),
+        before, after, files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
+      state.turns.push(t);
+      state.redo = [];
+      addEntry({ kind: "edit", turnId: t.id, label: t.label, files: t.files });
+      state.notes.push(`The user edited the layout by hand: ${t.label}. This is an inline style on the element in ${DECK_FILE}.`);
+      pushStatus();
+      return json(res, 200, { turnId: t.id });
     }
 
     // CLI endpoints (used by Claude Code via cli.mjs)

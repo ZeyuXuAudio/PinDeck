@@ -11,7 +11,7 @@ const api = (p, body) => fetch("/api/" + p, {
 
 const savedSlide = (() => { try { return +localStorage.getItem("editor.slide") || 0; } catch { return 0; } })();
 const state = {
-  slides: [], current: savedSlide, pins: [], pinMode: false,
+  status: {}, slides: [], current: savedSlide, pins: [], mode: "select", sel: null, // mode: "select" (move, resize) or "pin"
   busy: false, status: {}, turns: new Map(), // turnId -> { undone }
 };
 
@@ -60,9 +60,11 @@ window.__editorHost = {
     state.slides = inf.slides;
     state.current = Math.min(state.current, state.slides.length - 1);
     if (inf.current !== state.current) bridge.goto(state.current);
-    bridge.setPinMode(state.pinMode);
+    bridge.setMode(state.mode);
+    bridge.setEditable(!state.busy);
     refreshPinsFromSlides();
     bridge.renderPins(state.pins);
+    if (state.sel) bridge.selectEid(state.sel.eid);
     renderSlides();
     renderToolbar();
   },
@@ -83,7 +85,55 @@ window.__editorHost = {
     pinsChanged();
   },
   key(k, mod) { handleKey(k, mod); },
+  selectionChanged(info) { state.sel = info; renderPinTray(); },
+  commitEdit(op, label) { commitEdit(op, label); },
+  toast(msg) { toast(msg); },
 };
+
+/* ---- Hand edits (drag, resize, nudge) ---------------------------------------------------------- */
+let editChain = Promise.resolve(), nudgeAcc = null, nudgeTimer = null;
+function postEdit(op, label) {
+  editChain = editChain.then(async () => {
+    const res = await api("edit", { ops: [op], label });
+    if (!res.ok) {
+      toast((await res.json().catch(() => ({}))).error || "Could not save the change.");
+      loadMain();   // show the file as it is
+    }
+  });
+  return editChain;
+}
+function flushNudge() {
+  clearTimeout(nudgeTimer);
+  if (!nudgeAcc) return;
+  const n = nudgeAcc;
+  nudgeAcc = null;
+  postEdit(n.op, `Moved ${n.name} by ${n.dx}, ${n.dy} px`);
+}
+function commitEdit(op, label) {
+  if (label?.nudge) {   // arrow keys: one change per burst of key presses
+    if (nudgeAcc && nudgeAcc.op.eid !== op.eid) flushNudge();
+    nudgeAcc ??= { name: label.name, dx: 0, dy: 0 };
+    nudgeAcc.dx += label.dx; nudgeAcc.dy += label.dy; nudgeAcc.op = op;
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(flushNudge, 600);
+    return;
+  }
+  flushNudge();
+  postEdit(op, label);
+}
+async function undoRedo(which) {
+  flushNudge();
+  await editChain;
+  const res = await api(which, {});
+  if (!res.ok) toast((await res.json().catch(() => ({}))).error || `Nothing to ${which}.`);
+}
+let toastTimer = null;
+function toast(msg) {
+  $("toast").textContent = msg;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), 3200);
+}
 
 async function measureSlide(index) {
   const b = await measureReady;
@@ -119,22 +169,33 @@ function renderToolbar() {
   const s = state.slides[state.current];
   $("slide-pos").textContent = s ? `${state.current + 1} / ${state.slides.length}` : "– / –";
   $("slide-title").textContent = s ? s.title + (s.sub ? " · " + s.sub : "") : "";
-  $("pin-toggle").setAttribute("aria-pressed", String(state.pinMode));
-  $("pin-hint").hidden = !state.pinMode;
+  $("pin-toggle").setAttribute("aria-pressed", String(state.mode === "pin"));
+  $("select-toggle").setAttribute("aria-pressed", String(state.mode === "select"));
+  $("pin-hint").hidden = state.mode !== "pin";
+  const st = state.status;
+  $("undo").disabled = !st.undo || state.busy;
+  $("redo").disabled = !st.redo || state.busy;
+  $("undo").title = st.undo ? `Undo: ${st.undo} (⌘Z)` : "Undo (⌘Z)";
+  $("redo").title = st.redo ? `Redo: ${st.redo} (⇧⌘Z)` : "Redo (⇧⌘Z)";
 }
 $("prev").onclick = () => goto(state.current - 1);
 $("next").onclick = () => goto(state.current + 1);
-$("pin-toggle").onclick = () => setPinMode(!state.pinMode);
+$("pin-toggle").onclick = () => setMode(state.mode === "pin" ? "select" : "pin");
+$("select-toggle").onclick = () => setMode("select");
+$("undo").onclick = () => undoRedo("undo");
+$("redo").onclick = () => undoRedo("redo");
 $("present").onclick = () => {
   const ix = main?.bridge.indices(state.current) || { h: 0, v: 0 };
   window.open(`/deck/index.html#/${ix.h}${ix.v ? "/" + ix.v : ""}`, "_blank");
 };
 
 /* ---- Pins --------------------------------------------------------------------------------------- */
-function setPinMode(on) {
-  state.pinMode = on;
-  main?.bridge.setPinMode(on);
+function setMode(m) {
+  state.mode = m;
+  if (m !== "select") state.sel = null;
+  main?.bridge.setMode(m);
   renderToolbar();
+  renderPinTray();
 }
 function refreshPinsFromSlides() {
   // after a reload, slide indices may have moved: re-resolve by slide id, drop pins whose slide is gone
@@ -154,7 +215,11 @@ function shortEid(p) {
   return p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, "");
 }
 function renderPinTray() {
-  $("pin-tray").innerHTML = state.pins.map((p) => `
+  const sel = state.sel;
+  $("pin-tray").innerHTML = (sel ? `
+    <span class="chip sel" data-sel title="Selected: ${esc(sel.eid)}. Claude sees it as “this”.">
+      <span class="n">▢</span> S${sel.slide.index + 1} · ${esc(sel.eid.replace(/^[^/]+\//, ""))} <span class="dim">${sel.box.w} × ${sel.box.h}</span>
+      <button class="x" data-unsel aria-label="Deselect">×</button></span>` : "") + state.pins.map((p) => `
     <span class="chip" data-n="${p.n}" title="${esc(p.eid)}${p.text ? " — " + esc(p.text.slice(0, 80)) : ""}">
       <span class="n">${p.n}</span> S${p.slide.index + 1} · ${esc(shortEid(p))}${p.word ? ` “${esc(p.word)}”` : ""}
       ${p.locked ? '<span class="lock" title="Brand-locked">🔒</span>' : ""}
@@ -164,6 +229,8 @@ function renderPinTray() {
 $("pin-tray").addEventListener("click", (e) => {
   const x = e.target.closest("[data-x]");
   if (x) return window.__editorHost.removePin(+x.dataset.x);
+  if (e.target.closest("[data-unsel]")) return main?.bridge.deselect();
+  if (e.target.closest("[data-sel]")) return main?.bridge.highlight(state.sel.eid);
   const chip = e.target.closest(".chip");
   if (!chip) return;
   const p = state.pins.find((p) => p.n === +chip.dataset.n);
@@ -200,12 +267,19 @@ function md(s) {
 function entryHtml(e) {
   switch (e.kind) {
     case "user":
-      return `${esc(e.text)}${e.pins?.length || e.screenshot ? `<div class="chips">${(e.pins || []).map((p) =>
+      return `${esc(e.text)}${e.pins?.length || e.screenshot || e.selection ? `<div class="chips">${e.selection ?
+        `<span class="chip sel" title="${esc(e.selection.eid)}"><span class="n">▢</span> S${e.selection.slide} · ${esc(e.selection.label)}</span>` : ""}${(e.pins || []).map((p) =>
         `<span class="chip" title="${esc(p.eid)}"><span class="n">${p.n}</span> S${p.slide} · ${esc(p.label || p.eid)}</span>`).join("")}${
         e.screenshot ? '<span class="chip">📷 screenshot</span>' : ""}</div>` : ""}`;
     case "assistant": return md(e.text);
     case "tool":
       return `<span><span class="tn">${esc(e.name)}</span> ${esc(e.detail || "")}${e.error ? `<span class="err">${esc(e.error)}</span>` : ""}</span>`;
+    case "edit": {
+      const t = state.turns.get(e.turnId);
+      return `<span class="files ${t?.undone ? "undone" : ""}">✎ ${esc(e.label)}</span>
+        <button class="small" data-diff="${e.turnId}">Diff</button>
+        ${t && !t.undone ? `<button class="small" data-undo="${e.turnId}">Undo</button>` : t?.undone ? "<span>undone</span>" : ""}`;
+    }
     case "turn": {
       const t = e.turnId ? state.turns.get(e.turnId) : null;
       const parts = [];
@@ -237,7 +311,7 @@ function renderEntry(e) {
   el.innerHTML = entryHtml(e);
   el.__entry = e;
 }
-function rerenderTurns() { entryEls.forEach((el) => { if (el.__entry?.kind === "turn") el.innerHTML = entryHtml(el.__entry); }); }
+function rerenderTurns() { entryEls.forEach((el) => { if (["turn", "edit"].includes(el.__entry?.kind)) el.innerHTML = entryHtml(el.__entry); }); }
 const scrollChat = () => { chatEl.scrollTop = chatEl.scrollHeight; };
 function clearChat() {
   entryEls.forEach((el) => el.remove());
@@ -260,8 +334,10 @@ chatEl.addEventListener("click", async (e) => {
   const u = e.target.closest("[data-undo]");
   if (u) {
     u.disabled = true;
+    flushNudge();
+    await editChain;
     const res = await api(`turn/${u.dataset.undo}/undo`, {});
-    if (!res.ok) { u.disabled = false; alert((await res.json()).error); }
+    if (!res.ok) { u.disabled = false; toast((await res.json()).error); }
   }
 });
 $("diff-close").onclick = () => $("diff-dialog").close();
@@ -269,6 +345,7 @@ $("diff-close").onclick = () => $("diff-dialog").close();
 function setBusy(busy) {
   state.busy = busy;
   $("working").hidden = !busy;
+  main?.bridge.setEditable(!busy);
   $("send").hidden = busy;
   $("stop").hidden = !busy;
 }
@@ -279,12 +356,14 @@ async function send() {
   $("send").disabled = true;
   try {
     // measure every pinned slide plus the current one, in the user's own browser
+    flushNudge();
+    await editChain;
     const idx = [...new Set([...state.pins.map((p) => p.slide.index), state.current])].slice(0, 4);
     const layouts = [];
     for (const i of idx) { try { layouts.push(await queueMeasure(i)); } catch {} }
     const s = state.slides[state.current];
     const res = await api("message", {
-      text, pins: state.pins, layouts, screenshot: $("shot").checked,
+      text, pins: state.pins, selection: state.sel, layouts, screenshot: $("shot").checked,
       current: s ? { index: state.current, eid: s.eid } : null,
     });
     if (!res.ok) { alert((await res.json()).error || "Could not send."); return; }
@@ -293,7 +372,7 @@ async function send() {
     $("shot").checked = false;
     state.pins = [];
     pinsChanged();
-    setPinMode(false);
+    if (state.mode === "pin") setMode("select");
   } finally {
     $("send").disabled = false;
   }
@@ -312,23 +391,32 @@ function autosize() {
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
-  if (e.key === "Escape") { $("input").blur(); if (state.pinMode) setPinMode(false); }
+  if (e.key === "Escape") { $("input").blur(); if (state.mode === "pin") setMode("select"); }
 });
 
 /* ---- Keyboard ------------------------------------------------------------------------------------ */
 function handleKey(k, mod = {}) {
-  if (k === "p" || k === "P") setPinMode(!state.pinMode);
-  else if (k === "Escape") setPinMode(false);
+  if (mod.meta && (k === "z" || k === "Z")) return undoRedo(mod.shift ? "redo" : "undo");
+  if (mod.meta) return;
+  if (k === "p" || k === "P") setMode(state.mode === "pin" ? "select" : "pin");
+  else if (k === "v" || k === "V") setMode("select");
+  else if (k === "Escape") { if (state.mode === "pin") setMode("select"); else main?.bridge.deselect(); }
   else if (k === "Enter") $("input").focus();
+  else if (k.startsWith("Arrow") && state.sel && state.mode === "select") {
+    const step = mod.shift ? 10 : 1;
+    main?.bridge.nudge(k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0, k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0);
+  }
   else if (k === "ArrowLeft" || k === "ArrowUp" || k === "PageUp") goto(state.current - 1);
   else if (k === "ArrowRight" || k === "ArrowDown" || k === "PageDown" || k === " ") goto(state.current + 1);
 }
 document.addEventListener("keydown", (e) => {
-  if (e.target.closest("input, textarea, dialog")) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (["p", "P", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(e.key)) {
+  if (e.target.closest?.("input, textarea, dialog")) return;
+  const meta = e.metaKey || e.ctrlKey;
+  if (meta && (e.key === "z" || e.key === "Z")) { e.preventDefault(); return handleKey(e.key, { meta, shift: e.shiftKey }); }
+  if (meta || e.altKey) return;
+  if (["p", "P", "v", "V", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(e.key)) {
     e.preventDefault();
-    handleKey(e.key);
+    handleKey(e.key, { shift: e.shiftKey });
   }
 });
 
@@ -342,6 +430,7 @@ function applyStatus(s) {
   $("shot").disabled = !s.chrome;
   $("shot").parentElement.title = s.chrome ? "Attach a screenshot of the current slide with the pin markers"
     : "Screenshots need Chrome or Chromium";
+  renderToolbar();
 }
 function connect() {
   const es = new EventSource(`/api/events?t=${TOKEN}`);
@@ -355,7 +444,7 @@ function connect() {
   });
   es.addEventListener("chat", (ev) => {
     const e = JSON.parse(ev.data);
-    if (e.kind === "turn" && e.turnId) state.turns.set(e.turnId, { id: e.turnId, undone: false });
+    if ((e.kind === "turn" || e.kind === "edit") && e.turnId) state.turns.set(e.turnId, { id: e.turnId, undone: false });
     renderEntry(e);
     scrollChat();
   });
@@ -363,14 +452,17 @@ function connect() {
   es.addEventListener("status", (ev) => applyStatus(JSON.parse(ev.data)));
   es.addEventListener("reset", () => { clearChat(); state.turns.clear(); });
   es.addEventListener("undone", (ev) => {
-    const t = state.turns.get(JSON.parse(ev.data).turnId);
-    if (t) t.undone = true;
+    const d = JSON.parse(ev.data);
+    const t = state.turns.get(d.turnId);
+    if (t) t.undone = d.undone !== false;
     rerenderTurns();
   });
   es.addEventListener("files", (ev) => {
-    const { files } = JSON.parse(ev.data);
+    const { files, manual } = JSON.parse(ev.data);
     const cssOnly = files.every((f) => f.endsWith(".css"));
-    if (cssOnly && main) {
+    if (manual && main) {
+      loadMeasure();   // the visible slide already shows the hand edit
+    } else if (cssOnly && main) {
       main.bridge.reloadCss(files);
       measure?.bridge?.reloadCss(files);
     } else {

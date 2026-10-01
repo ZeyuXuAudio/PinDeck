@@ -1,7 +1,7 @@
 /* Editor bridge, injected into the deck page by the editor server (never saved to the deck).
 
    Modes (?editor=...):
-     main     the visible slide in the editor: navigation, pins, hover outlines
+     main     the visible slide in the editor: navigation, selection, drag and resize, pins
      measure  hidden 1280x720 copy used to measure any slide without moving the user's view
      shot     headless screenshot of one slide, with pin markers
      dump     headless measurement; writes the result into the DOM for --dump-dom */
@@ -35,7 +35,27 @@
       outline-offset:calc(3px*var(--u,1)); animation:__flash 1.4s ease-out forwards; }
     @keyframes __flash { 0%,60% { opacity:1 } 100% { opacity:0 } }
     html.__pinmode .reveal .slides section, html.__pinmode .reveal .slides section * { cursor:crosshair !important; }
-    html.__pinmode .reveal .slides section .__pin { cursor:pointer !important; }`;
+    html.__pinmode .reveal .slides section .__pin { cursor:pointer !important; }
+    .__hover.sel { outline:calc(1px*var(--u,1)) solid #1a73e8; outline-offset:0; background:none; }
+    .__hover.sel span { background:#1a73e8; }
+    .__sel { position:absolute; z-index:1001; pointer-events:none; outline:calc(1.5px*var(--u,1)) solid #1a73e8; }
+    .__sel i { position:absolute; width:calc(9px*var(--u,1)); height:calc(9px*var(--u,1)); margin:calc(-5px*var(--u,1)) 0 0 calc(-5px*var(--u,1));
+      background:#fff; border:calc(1.5px*var(--u,1)) solid #1a73e8; box-sizing:border-box; pointer-events:auto; }
+    .__sel i[data-h="nw"] { left:0; top:0; cursor:nwse-resize; }   .__sel i[data-h="n"] { left:50%; top:0; cursor:ns-resize; }
+    .__sel i[data-h="ne"] { left:100%; top:0; cursor:nesw-resize; } .__sel i[data-h="e"] { left:100%; top:50%; cursor:ew-resize; }
+    .__sel i[data-h="se"] { left:100%; top:100%; cursor:nwse-resize; } .__sel i[data-h="s"] { left:50%; top:100%; cursor:ns-resize; }
+    .__sel i[data-h="sw"] { left:0; top:100%; cursor:nesw-resize; } .__sel i[data-h="w"] { left:0; top:50%; cursor:ew-resize; }
+    .__sel.readonly i { display:none; }
+    .__sel-label { position:absolute; left:calc(-1.5px*var(--u,1)); white-space:nowrap; background:#1a73e8; color:#fff;
+      font:600 calc(11px*var(--u,1))/calc(17px*var(--u,1)) system-ui, sans-serif; padding:0 calc(5px*var(--u,1));
+      border-radius:calc(3px*var(--u,1)); font-variant-numeric:tabular-nums; }
+    .__sel-label.above { top:calc(-21px*var(--u,1)); } .__sel-label.below { bottom:calc(-21px*var(--u,1)); }
+    .__guide { position:absolute; z-index:1002; pointer-events:none; background:#e5399d; }
+    .__guide.v { top:0; height:100%; width:calc(1px*var(--u,1)); }
+    .__guide.h { left:0; width:100%; height:calc(1px*var(--u,1)); }
+    html.__selmode .reveal .slides section * { cursor:default; }
+    html.__selmode .reveal .slides section .__selected, html.__selmode.__dragging * { cursor:move !important; }
+    html.__selmode .reveal .slides section .__sel i { cursor:inherit; }`;
   document.head.appendChild(css);
 
   /* ---- Geometry ------------------------------------------------------------------ */
@@ -166,7 +186,8 @@
   function indices(index) { const sec = slides()[index]; return sec ? Reveal.getIndices(sec) : { h: 0, v: 0 }; }
 
   /* ---- Pins and hover ---------------------------------------------------------------------- */
-  let pinMode = false, pins = [];
+  let mode = "select", pins = [], editable = true;   // mode: "select" (drag, resize) or "pin"
+  const tagOf = (el) => el.tagName.toLowerCase() + (el.classList.length ? "." + [...el.classList].filter((c) => !c.startsWith("__")).join(".") : "");
   function wordAt(x, y, el) {
     let node, offset;
     if (document.caretPositionFromPoint) {
@@ -188,19 +209,21 @@
   function targetOf(t) {
     if (!t || !t.closest) return null;
     const sec = t.closest(".reveal .slides section");
-    if (!sec || t.closest(".__pin, .__hover")) return null;
+    if (!sec || t.closest(".__pin, .__hover, .__sel, .__guide")) return null;
     const foot = t.closest(".slide-foot");
     const el = foot ? sec : t.closest("[data-eid]") || sec;
     const locked = foot ? "footer, set by brand.css (locked)" : el !== sec && el.matches(LOCKED_SEL) ? "positioned by brand.css (locked)" : null;
     return { sec: el === sec ? sec : el.closest("section"), el, locked, foot };
   }
   function onPointerDown(e) {
-    if (!pinMode || MODE !== "main") return;
+    if (MODE !== "main" || e.button !== 0) return;
+    if (mode === "select") return selectPointerDown(e);
     e.preventDefault(); e.stopPropagation();
   }
   function onClick(e) {
-    if (!pinMode || MODE !== "main") return;
+    if (MODE !== "main") return;
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    if (mode !== "pin") return;
     const marker = e.target.closest?.(".__pin");
     if (marker) { host()?.removePin(+marker.dataset.n); return; }
     const t = targetOf(e.target);
@@ -213,7 +236,7 @@
     const textEl = e.target.nodeType === 1 && e.target.closest(".__pin") == null ? e.target : t.el;
     const pin = {
       slide: slideInfo(t.sec), eid: t.el.dataset.eid || slideInfo(t.sec).eid,
-      tag: t.foot ? "footer.slide-foot" : t.el.tagName.toLowerCase() + (t.el.classList.length ? "." + [...t.el.classList].join(".") : ""),
+      tag: t.foot ? "footer.slide-foot" : tagOf(t.el),
       text: textOf(t.foot || t.el).slice(0, 200), box, point, at,
       word: wordAt(e.clientX, e.clientY, t.foot || t.el), font: fontOf(textEl),
       cell: cellEl ? { row: cellEl.parentElement.rowIndex, col: cellEl.cellIndex, text: textOf(cellEl) } : null,
@@ -223,7 +246,8 @@
   }
   let hoverBox = null;
   function onMove(e) {
-    if (!pinMode || MODE !== "main") return hideHover();
+    if (MODE !== "main" || drag) return hideHover();
+    if (mode === "select") return selectHover(e);
     const t = targetOf(e.target);
     if (!t) return hideHover();
     if (!hoverBox) { hoverBox = document.createElement("div"); hoverBox.className = "__hover"; hoverBox.appendChild(document.createElement("span")); }
@@ -232,6 +256,7 @@
     if (hoverBox.parentElement !== t.sec) t.sec.appendChild(hoverBox);
     Object.assign(hoverBox.style, { left: b.x + "px", top: b.y + "px", width: b.w + "px", height: b.h + "px" });
     hoverBox.classList.toggle("locked", !!t.locked);
+    hoverBox.classList.remove("sel");
     const eid = t.foot ? "footer (locked)" : t.el.dataset.eid || "";
     hoverBox.firstChild.textContent = (t.el === t.sec && !t.foot ? "slide " : "") + eid.replace(/^[^/]+\//, "/") + (t.locked && !t.foot ? " (locked)" : "");
     hoverBox.firstChild.className = b.y < 30 ? "below" : "above";
@@ -272,6 +297,239 @@
     setTimeout(() => f.remove(), 1500);
   }
 
+  /* ---- Select, drag and resize --------------------------------------------------------------------
+     Moves are stored as the CSS `translate` property and sizes as width/height, inline on the element.
+     `translate` works the same for elements in the flow and absolutely positioned ones, and leaves the
+     layout around the element alone. The host writes the change into index.html. */
+  let sel = null, selBox = null, drag = null;
+  const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const KEEP_ASPECT = new Set(["img", "svg", "video", "canvas", "iframe"]);
+
+  function selectableOf(t) {
+    const tt = targetOf(t);
+    if (!tt) return null;
+    if (tt.foot || tt.locked) return { locked: tt.locked || "footer, set by brand.css (locked)", el: tt.foot || tt.el, sec: tt.sec };
+    let el = tt.el;
+    const svg = el.closest("svg");
+    if (svg && svg !== el && svg.dataset.eid) el = svg;   // parts of an inline SVG move with the SVG
+    // inline boxes cannot be translated or sized: take the nearest block with an id
+    while (el && el !== tt.sec && getComputedStyle(el).display === "inline") el = el.parentElement.closest("[data-eid]");
+    if (!el || el === tt.sec) return null;
+    return { el, sec: tt.sec };
+  }
+  function translateOf(el) {
+    const v = getComputedStyle(el).translate;
+    if (!v || v === "none") return [0, 0];
+    const [x = "0", y = "0"] = v.split(/\s+/);
+    return [parseFloat(x) || 0, parseFloat(y) || 0];
+  }
+  const fmtTranslate = (x, y) => (r1(x) || r1(y) ? `${r1(x)}px ${r1(y)}px` : "");
+  const nameOf = (el, sec) => { const e = el.dataset.eid || ""; return e.startsWith(sec.dataset.eid + "/") ? e.slice(sec.dataset.eid.length) : e; };
+
+  function drawSel() {
+    if (!sel || !sel.el.isConnected) return removeSel();
+    if (!selBox) {
+      selBox = document.createElement("div");
+      selBox.className = "__sel";
+      selBox.innerHTML = '<span class="__sel-label"></span>' + HANDLES.map((h) => `<i data-h="${h}"></i>`).join("");
+    }
+    if (selBox.parentElement !== sel.sec) sel.sec.appendChild(selBox);
+    const b = boxOf(sel.el, sel.sec);
+    Object.assign(selBox.style, { left: b.x + "px", top: b.y + "px", width: b.w + "px", height: b.h + "px" });
+    selBox.classList.toggle("readonly", !editable);
+    const lab = selBox.firstChild;
+    lab.textContent = `${nameOf(sel.el, sel.sec)}   ` + (drag?.kind === "move" ? `x ${b.x}  y ${b.y}` : `${b.w} × ${b.h}`);
+    lab.className = "__sel-label " + (b.y < 30 ? "below" : "above");
+  }
+  function removeSel() { selBox?.remove(); document.querySelectorAll(".__selected").forEach((e) => e.classList.remove("__selected")); }
+  function select(el, sec, notify = true) {
+    removeSel();
+    sel = el ? { el, sec } : null;
+    if (sel) { sel.el.classList.add("__selected"); drawSel(); }
+    if (notify) host()?.selectionChanged(sel ? selectionInfo() : null);
+  }
+  function selectionInfo() {
+    const { el, sec } = sel;
+    return { eid: el.dataset.eid, slide: slideInfo(sec), tag: tagOf(el), box: boxOf(el, sec), text: textOf(el).slice(0, 120) };
+  }
+  function selectEid(eid) {
+    const el = eid && byEid(eid);
+    const sec = el?.closest("section");
+    if (!el || sec !== Reveal.getCurrentSlide()) return select(null, null);
+    select(el, sec);
+  }
+
+  function selectHover(e) {
+    const t = selectableOf(e.target);
+    if (!t || (sel && t.el === sel.el)) return hideHover();
+    if (!hoverBox) { hoverBox = document.createElement("div"); hoverBox.className = "__hover"; hoverBox.appendChild(document.createElement("span")); }
+    const b = boxOf(t.el, t.sec);
+    if (hoverBox.parentElement !== t.sec) t.sec.appendChild(hoverBox);
+    Object.assign(hoverBox.style, { left: b.x + "px", top: b.y + "px", width: b.w + "px", height: b.h + "px" });
+    hoverBox.classList.toggle("locked", !!t.locked);
+    hoverBox.classList.toggle("sel", !t.locked);
+    hoverBox.firstChild.textContent = t.locked ? (t.el.classList.contains("slide-foot") ? "footer (locked)" : nameOf(t.el, t.sec) + " (locked)") : nameOf(t.el, t.sec);
+    hoverBox.firstChild.className = b.y < 30 ? "below" : "above";
+  }
+
+  /* Snap targets: slide edges and centre, the footer rule, and the edges and centres of other elements */
+  function snapTargets(sec, el) {
+    const xs = [0, W / 2, W], ys = [0, H / 2, H];
+    if (sec.querySelector(".slide-foot")) ys.push(FOOTER_TOP);
+    for (const o of sec.querySelectorAll("[data-eid]")) {
+      if (o === el || el.contains(o) || o.contains(el)) continue;
+      if (o.closest("svg") && o.tagName.toLowerCase() !== "svg") continue;
+      if (!o.getClientRects().length) continue;
+      const b = boxOf(o, sec);
+      if (!b.w || !b.h) continue;
+      xs.push(b.x, b.x + b.w / 2, b.x + b.w);
+      ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+    }
+    return { xs, ys };
+  }
+  function snapTo(values, targets, tol) {
+    let best = null;
+    for (const v of values) for (const t of targets) {
+      const d = t - v;
+      if (Math.abs(d) <= tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: t };
+    }
+    return best;
+  }
+  function showGuides(sec, xs, ys) {
+    clearGuides();
+    for (const [list, cls, prop] of [[xs, "v", "left"], [ys, "h", "top"]]) {
+      for (const v of new Set(list.map(Math.round))) {
+        const g = document.createElement("div");
+        g.className = "__guide " + cls;
+        g.style[prop] = v + "px";
+        sec.appendChild(g);
+      }
+    }
+  }
+  function clearGuides() { document.querySelectorAll(".__guide").forEach((g) => g.remove()); }
+
+  function selectPointerDown(e) {
+    e.preventDefault(); e.stopPropagation();
+    hideHover();
+    const handle = e.target.closest?.(".__sel i[data-h]");
+    if (!handle) {
+      if (e.target.closest?.(".__pin")) return;   // pin markers are removed in pin mode only
+      const t = selectableOf(e.target);
+      if (!t) return select(null, null);
+      if (t.locked) {
+        select(null, null);
+        host()?.toast(`${t.el.classList.contains("slide-foot") ? "The footer is" : "This element is"} set by brand.css and locked.`);
+        return;
+      }
+      if (!sel || sel.el !== t.el) select(t.el, t.sec);
+    }
+    if (!editable) { if (handle) host()?.toast("Claude is working. Moving and resizing resume when it has finished."); return; }
+    const el = sel.el, cs = getComputedStyle(el);
+    const { s } = frame(sel.sec);
+    const [tx, ty] = translateOf(el);
+    drag = {
+      kind: handle ? "resize" : "move", handle: handle?.dataset.h, x0: e.clientX, y0: e.clientY, s, started: !!handle,
+      b: boxOf(el, sel.sec), tx, ty, cw: parseFloat(cs.width) || 0, ch: parseFloat(cs.height) || 0,
+      maxW: cs.maxWidth, maxH: cs.maxHeight, targets: snapTargets(sel.sec, el),
+      before: { translate: el.style.translate, width: el.style.width, height: el.style.height, "max-width": el.style.maxWidth, "max-height": el.style.maxHeight },
+    };
+    document.documentElement.setPointerCapture?.(e.pointerId);
+  }
+  function onDragMove(e) {
+    if (!drag || !sel) return;
+    let dx = (e.clientX - drag.x0) / drag.s, dy = (e.clientY - drag.y0) / drag.s;
+    if (!drag.started) {
+      if (Math.hypot(dx * drag.s, dy * drag.s) < 4) return;
+      drag.started = true;
+      document.documentElement.classList.add("__dragging");
+    }
+    e.preventDefault();
+    const tol = 6 / drag.s, snap = !e.altKey, { b, targets } = drag, el = sel.el;
+    const gx = [], gy = [];
+    if (drag.kind === "move") {
+      if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+      if (snap && !(e.shiftKey && dx === 0)) {
+        const sx = snapTo([b.x + dx, b.x + dx + b.w / 2, b.x + dx + b.w], targets.xs, tol);
+        if (sx) { dx += sx.d; gx.push(sx.at); }
+      }
+      if (snap && !(e.shiftKey && dy === 0)) {
+        const sy = snapTo([b.y + dy, b.y + dy + b.h / 2, b.y + dy + b.h], targets.ys, tol);
+        if (sy) { dy += sy.d; gy.push(sy.at); }
+      }
+      el.style.translate = fmtTranslate(drag.tx + dx, drag.ty + dy);
+      drag.label = `Moved ${nameOf(el, sel.sec)} by ${r1(dx)}, ${r1(dy)} px`;
+    } else {
+      const h = drag.handle;
+      let w = b.w, ht = b.h, ox = 0, oy = 0;   // ox/oy: how far the left/top edge moves
+      if (h.includes("e")) w = b.w + dx;
+      if (h.includes("w")) { w = b.w - dx; ox = dx; }
+      if (h.includes("s")) ht = b.h + dy;
+      if (h.includes("n")) { ht = b.h - dy; oy = dy; }
+      if (snap) {
+        let t;
+        if (h.includes("e") && (t = snapTo([b.x + w], targets.xs, tol))) { w += t.d; gx.push(t.at); }
+        if (h.includes("w") && (t = snapTo([b.x + ox], targets.xs, tol))) { ox += t.d; w -= t.d; gx.push(t.at); }
+        if (h.includes("s") && (t = snapTo([b.y + ht], targets.ys, tol))) { ht += t.d; gy.push(t.at); }
+        if (h.includes("n") && (t = snapTo([b.y + oy], targets.ys, tol))) { oy += t.d; ht -= t.d; gy.push(t.at); }
+      }
+      // images and other media keep their aspect ratio (Shift toggles)
+      const keep = KEEP_ASPECT.has(el.tagName.toLowerCase()) !== e.shiftKey && b.w > 0 && b.h > 0;
+      if (keep) {
+        const ratio = b.w / b.h;
+        const useW = h.length === 1 ? /[ew]/.test(h) : Math.abs(w / b.w - 1) >= Math.abs(ht / b.h - 1);
+        if (useW) { const nh = w / ratio; if (h.includes("n")) oy += ht - nh; ht = nh; }
+        else { const nw = ht * ratio; if (h.includes("w")) ox += w - nw; w = nw; }
+      }
+      w = Math.max(8, w); ht = Math.max(8, ht);
+      const setW = keep || /[ew]/.test(h), setH = keep || /[ns]/.test(h);
+      // style width/height exclude padding and border for content-box elements
+      if (setW) { el.style.width = r1(w - (b.w - drag.cw)) + "px"; if (drag.maxW !== "none") el.style.maxWidth = "none"; }
+      if (setH) { el.style.height = r1(ht - (b.h - drag.ch)) + "px"; if (drag.maxH !== "none") el.style.maxHeight = "none"; }
+      el.style.translate = fmtTranslate(drag.tx + ox, drag.ty + oy);
+      drag.label = `Resized ${nameOf(el, sel.sec)} to ${r1(w)} × ${r1(ht)} px`;
+    }
+    drawSel();
+    showGuides(sel.sec, gx, gy);
+    renderPins(pins);
+  }
+  function onDragEnd() {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    document.documentElement.classList.remove("__dragging");
+    clearGuides();
+    if (!sel) return;
+    drawSel();
+    if (d.started) commit(d.before, d.label);
+  }
+  function commit(before, label) {
+    const el = sel.el, set = {};
+    const now = { translate: el.style.translate, width: el.style.width, height: el.style.height,
+      "max-width": el.style.maxWidth, "max-height": el.style.maxHeight };
+    for (const k of Object.keys(now)) if (now[k] !== before[k]) set[k] = now[k] || null;
+    if (Object.keys(set).length) host()?.commitEdit({ eid: el.dataset.eid, set }, label);
+    host()?.selectionChanged(selectionInfo());
+  }
+  function nudge(dx, dy) {
+    if (!sel) return;
+    if (!editable) return host()?.toast("Claude is working. Moving and resizing resume when it has finished.");
+    const el = sel.el;
+    const [tx, ty] = translateOf(el);
+    el.style.translate = fmtTranslate(tx + dx, ty + dy);
+    drawSel();
+    renderPins(pins);
+    host()?.commitEdit({ eid: el.dataset.eid, set: { translate: el.style.translate || null } },
+      { nudge: true, name: nameOf(el, sel.sec), dx, dy });
+    host()?.selectionChanged(selectionInfo());
+  }
+  function setMode(m) {
+    mode = m;
+    document.documentElement.classList.toggle("__pinmode", mode === "pin");
+    document.documentElement.classList.toggle("__selmode", mode === "select");
+    hideHover();
+    if (mode !== "select" && sel) select(null, null);
+  }
+
   /* ---- Stylesheet hot swap (no reload, no flicker) -------------------------------------------- */
   function reloadCss(files) {
     const links = [...document.querySelectorAll('link[rel="stylesheet"]')];
@@ -281,7 +539,7 @@
         const u = new URL(l.href);
         u.searchParams.set("v", Date.now());
         n.href = u.href;
-        n.onload = n.onerror = () => { l.remove(); resolve(); setTimeout(() => renderPins(pins), 0); };
+        n.onload = n.onerror = () => { l.remove(); resolve(); setTimeout(() => { renderPins(pins); if (sel) drawSel(); }, 0); };
         l.after(n);
       })));
   }
@@ -316,7 +574,10 @@
 
     const api = {
       info, goto, indices, highlight, reloadCss,
-      setPinMode(on) { pinMode = !!on; document.documentElement.classList.toggle("__pinmode", pinMode); if (!pinMode) hideHover(); },
+      setMode, selectEid, nudge,
+      deselect() { select(null, null); },
+      hasSelection: () => !!sel,
+      setEditable(on) { editable = !!on; if (sel) drawSel(); },
       renderPins,
       async measure(index) {
         goto(index);
@@ -331,16 +592,28 @@
       document.addEventListener("click", onClick, true);
       document.addEventListener("mousemove", onMove, true);
       document.addEventListener("mouseleave", hideHover);
+      document.documentElement.addEventListener("pointermove", onDragMove);
+      document.documentElement.addEventListener("pointerup", onDragEnd);
+      document.documentElement.addEventListener("pointercancel", onDragEnd);
       window.addEventListener("keydown", (e) => {
         if (e.target.closest?.("input, textarea, [contenteditable]")) return;
-        const k = e.key;
-        if (k === "p" || k === "P" || k === "Escape" || (k === "Enter" && !e.shiftKey) ||
-            ((e.metaKey || e.ctrlKey) && (k === "z" || k === "k"))) {
+        const k = e.key, meta = e.metaKey || e.ctrlKey;
+        // arrows nudge the selection (Shift: 10 px) instead of changing slides
+        if (sel && mode === "select" && !meta && k.startsWith("Arrow")) {
           e.preventDefault(); e.stopImmediatePropagation();
-          host()?.key(k, { meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
+          const step = e.shiftKey ? 10 : 1;
+          nudge(k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0, k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0);
+          return;
+        }
+        if ("pPvV".includes(k) && !meta || k === "Escape" || (k === "Enter" && !e.shiftKey) ||
+            (meta && (k === "z" || k === "Z" || k === "k"))) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          host()?.key(k, { meta, shift: e.shiftKey });
         }
       }, true);
-      Reveal.on("slidechanged", () => { hideHover(); host()?.slideChanged(indexOf(Reveal.getCurrentSlide())); });
+      Reveal.on("slidechanged", () => { hideHover(); if (sel) select(null, null); host()?.slideChanged(indexOf(Reveal.getCurrentSlide())); });
+      Reveal.on("resize", () => { if (sel) drawSel(); });
+      setMode("select");
       const startAt = +params.get("start");
       if (startAt) goto(startAt);
     }

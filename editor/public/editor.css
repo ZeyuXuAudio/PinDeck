@@ -67,6 +67,14 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .toggle[aria-pressed="true"] { background: var(--orange); border-color: var(--orange); color: #fff; }
 .toggle[aria-pressed="true"] .dot { background: #fff; color: var(--orange); }
 .toggle[aria-pressed="true"] kbd { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
+.seg { display: inline-flex; }
+.seg button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.seg button:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+#select-toggle[aria-pressed="true"] { background: #1a73e8; border-color: #1a73e8; }
+.ic { width: 13px; height: 13px; fill: currentColor; }
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 5; max-width: 80%;
+  background: rgba(25,27,31,.92); color: #fff; padding: 7px 14px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.3); }
 .pin-hint { background: var(--orange); color: #fff; padding: 5px 14px; font-size: 13px; flex: none; }
 .pin-hint kbd { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
 .stage { position: relative; flex: 1; min-height: 0; background: var(--stage); }
@@ -111,6 +119,11 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .chip .x { border: 0; background: none; padding: 0 2px; color: var(--muted); font-size: 14px; line-height: 1; }
 .chip .x:hover { color: var(--danger); }
 .chip .lock { color: var(--muted); }
+.chip.sel .n { background: #1a73e8; border-radius: 4px; font-size: 10px; }
+.chip .dim { color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg.edit { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.msg.edit .files { color: var(--ink); }
+.msg.edit .undone { text-decoration: line-through; }
 .working { display: flex; align-items: center; gap: 8px; padding: 6px 14px; color: var(--muted); font-size: 13px;
   border-top: 1px solid var(--line); }
 .spinner { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--orange); border-radius: 50%;

@@ -37,7 +37,8 @@ function parseAttrs(src, offset) {
       if (m[0][k] === '"' || m[0][k] === "'") k++;
       valueStart = offset + m.index + k;
     }
-    attrs[name] = { value, valueStart, valueEnd: valueStart + value.length };
+    const start = offset + m.index;
+    attrs[name] = { value, valueStart, valueEnd: valueStart + value.length, start, end: start + m[0].length };
   }
   return attrs;
 }
@@ -252,4 +253,55 @@ export function assignEids(html) {
   let out = html;
   for (const e of edits) out = out.slice(0, e.start) + e.replace + out.slice(e.end);
   return { html: out, changed: true, assigned, renamed, slides };
+}
+
+/* ---- Inline style edits (drag and resize in the editor) ---------------------------------- */
+
+/* Sets or removes CSS properties in a style attribute, keeping the untouched declarations
+   exactly as written. A value of null or "" removes the property. */
+export function mergeStyle(src, set) {
+  const parts = src.split(";").filter((p) => p.trim());
+  const todo = Object.fromEntries(Object.entries(set).map(([k, v]) => [k.toLowerCase(), v]));
+  const out = [];
+  for (const p of parts) {
+    const name = p.split(":")[0].trim().toLowerCase();
+    if (!(name in todo)) { out.push(p); continue; }
+    const v = todo[name];
+    delete todo[name];
+    if (v != null && v !== "") out.push(`${p.match(/^\s*/)[0]}${name}: ${v}`);
+  }
+  for (const [k, v] of Object.entries(todo)) if (v != null && v !== "") out.push(`${out.length ? " " : ""}${k}: ${v}`);
+  return out.join(";").trim();
+}
+
+/* edits: [{ eid, set: { prop: value|null } }]. Returns { html, changed, missing: [eid] }. */
+export function setStyles(html, edits) {
+  const tree = parse(html);
+  const byEid = new Map();
+  walk(tree, (c) => { const v = c.attrs?.["data-eid"]?.value; if (v && !byEid.has(v)) byEid.set(v, c); });
+  const ops = [], missing = [];
+  for (const e of edits) {
+    const node = byEid.get(e.eid);
+    if (!node) { missing.push(e.eid); continue; }
+    const st = node.attrs.style;
+    const value = mergeStyle(st ? st.value : "", e.set).replace(/"/g, "'");
+    if (st) {
+      if (value === st.value) continue;
+      if (value) ops.push({ start: st.valueStart, end: st.valueEnd, replace: value });
+      else {
+        let a = st.start;
+        while (a > node.nameEnd && /\s/.test(html[a - 1])) a--;
+        ops.push({ start: a, end: st.end, replace: "" });
+      }
+    } else if (value) {
+      let at = node.selfClose ? node.tagEnd - 1 : node.tagEnd;
+      while (at > node.nameEnd && /\s/.test(html[at - 1])) at--;
+      ops.push({ start: at, end: at, replace: ` style="${value}"` });
+    }
+  }
+  if (!ops.length) return { html, changed: false, missing };
+  ops.sort((a, b) => b.start - a.start);
+  let out = html;
+  for (const o of ops) out = out.slice(0, o.start) + o.replace + out.slice(o.end);
+  return { html: out, changed: true, missing };
 }

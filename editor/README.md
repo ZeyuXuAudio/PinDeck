@@ -24,8 +24,10 @@ screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), no
 
 | Action | How |
 |---|---|
+| Select, move, resize | Select mode (`V`, the default): click an element to select it, drag to move, pull a handle to resize. Elements snap to the slide edges and centre, the footer rule and other elements (pink guides); hold `Alt` to turn snapping off, `Shift` to move along one axis. Images keep their aspect ratio (`Shift` toggles). Arrow keys nudge by 1 px, `Shift`+arrows by 10 px. |
+| Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and Claude's changes. |
 | Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
-| Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". `Enter` sends, `Shift+Enter` adds a new line. |
+| Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". The selected element is sent too, so "make this smaller" works. `Enter` sends, `Shift+Enter` adds a new line. |
 | Visual questions | Tick "Include screenshot" to attach the current slide with the pin markers. |
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
@@ -41,6 +43,11 @@ the files changed. CSS changes are swapped in without a reload.
   inserted; the rest of the file stays as it was. A backup of the file before the first change is
   kept in `~/.pindeck/decks/<deck>/backups/`. Ids survive edits, so pins, layout reports and Claude all name
   the same element.
+* **Hand edits.** A move is stored as the CSS `translate` property and a resize as `width`/`height`,
+  inline on the element in `index.html`. `translate` moves an element without changing the layout
+  around it, for elements in the flow and absolutely positioned ones alike. Only that one style
+  attribute is rewritten; the rest of the file stays as it was. Claude gets a note about each hand
+  edit. Brand-locked elements (footer, logos) cannot be selected.
 * **Pins.** A pin records the element id, its box in slide coordinates (1280 x 720), the click
   point, the clicked word and, in tables, the cell. Pins on the footer or logos are marked as
   locked.
@@ -55,8 +62,8 @@ the files changed. CSS changes are swapped in without a reload.
 * **Permissions.** Claude may read files, edit `index.html` and `theme.css`, and run the editor's
   CLI. Nothing else, and in particular no edits to `brand.css`. If `brand.css` changes during a
   turn anyway, the server restores it and says so in the chat.
-* **Undo.** The server keeps a copy of the editable files from before each turn. Undo restores
-  them and tells Claude on the next message.
+* **Undo.** The server keeps a copy of the editable files from before each change (a Claude turn
+  or a hand edit). Undo and redo walk that history and tell Claude on the next message.
 
 ## Files
 
@@ -70,11 +77,20 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.0
+## Limits of version 1.1
 
-* No direct manipulation yet: dragging, resizing and text editing on the slide are the next step.
-* Undo covers Claude's changes, one turn at a time, newest first.
+* No text editing on the slide yet; ask Claude, or edit `index.html`.
+* Parts of an inline SVG move with the whole SVG; inline text (bold, spans) moves with its block.
+* Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to
+  turn hand edits into proper CSS when a layout should really change.
+* The undo history lives in the server and starts fresh when PinDeck restarts.
 * Headless Chrome on macOS can be slow to start; screenshots take about 1.5 s.
+
+## Versions
+
+* **1.1**: select, drag, resize and nudge with snapping guides; one undo/redo history for hand
+  edits and Claude's changes; the selected element is sent to Claude.
+* **1.0**: pins, chat with Claude Code, layout reports, element ids, diff and undo.
 
 ## License
 

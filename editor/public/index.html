@@ -26,13 +26,20 @@
         <span id="slide-title" class="slide-title"></span>
       </div>
       <div class="group">
-        <button id="pin-toggle" class="toggle" title="Pin mode (P): click elements to pin them, Esc to stop" aria-pressed="false">
-          <span class="dot">1</span> Pin <kbd>P</kbd></button>
+        <button id="undo" class="icon" aria-label="Undo" title="Undo (⌘Z)" disabled>↶</button>
+        <button id="redo" class="icon" aria-label="Redo" title="Redo (⇧⌘Z)" disabled>↷</button>
+        <span class="seg" role="group" aria-label="Mode">
+          <button id="select-toggle" class="toggle" aria-pressed="true"
+            title="Select (V): click to select, drag to move, handles to resize, arrows to nudge (Shift: 10 px), Alt: no snapping">
+            <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2l9 5-4 1.2L6.3 13z"/></svg> Select <kbd>V</kbd></button>
+          <button id="pin-toggle" class="toggle" title="Pin (P): click elements to pin them for Claude, Esc to stop" aria-pressed="false">
+            <span class="dot">1</span> Pin <kbd>P</kbd></button>
+        </span>
         <button id="present" title="Open the deck in a new tab to present">Present ↗</button>
       </div>
     </div>
     <div id="pin-hint" class="pin-hint" hidden>Pin mode: click elements on the slide. Click a marker to remove it. <kbd>Esc</kbd> to stop.</div>
-    <div id="stage" class="stage"></div>
+    <div id="stage" class="stage"><div id="toast" class="toast" role="status" hidden></div></div>
   </main>
 
   <!-- Right: chat with Claude -->
@@ -49,6 +56,8 @@
         <p><strong>Pin, then ask.</strong></p>
         <p>Press <kbd>P</kbd> and click elements on the slide. Each click gets a number. Then write what to change, e.g.
           <em>“1: align with 2, make 3 smaller”</em>.</p>
+        <p>Or move things yourself: click to select, drag to move, pull a handle to resize, arrow keys to nudge.
+          A selected element is what Claude takes “this” to mean.</p>
         <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
           <code>brand.css</code> is locked.</p>
       </div>
