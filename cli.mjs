@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* PinDeck command line for Claude's self-checks (needs the PinDeck server running).
+/* PinDeck command line: Claude's self-checks (need the PinDeck server running) and git setup.
 
    node cli.mjs layout <slide>   measured layout and issues of one slide
    node cli.mjs shot <slide>     screenshot with pin markers; prints the PNG path
@@ -7,16 +7,43 @@
    node cli.mjs pdf handout      PDF with one page per slide (build steps in their final state)
    node cli.mjs pdf presentation PDF with one page per build step
 
+   node cli.mjs git-setup [deck] keep PinDeck's data-eid ids out of git (no server needed)
+
    <slide> is a slide id (data-eid), a slide number (1-based) or "current". */
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const [cmd, arg] = process.argv.slice(2);
+
+/* git-setup: a git "clean" filter strips PinDeck's data-eid attributes whenever git reads the deck's
+   HTML, so ids never reach a commit and id-only changes do not show in `git status`. The ids stay in
+   the file on disk, where PinDeck and Claude need them. The filter is plain sed, so it does not depend
+   on where PinDeck is installed; git config is per clone, so run this once in each clone. */
+if (cmd === "git-setup") {
+  const FILTER = `sed 's/ data-eid="[^"]*"//g'`;
+  const deck = path.resolve(arg || ".");
+  const git = (...a) => execFileSync("git", ["-C", deck, ...a], { encoding: "utf8" }).trim();
+  let root;
+  try { root = git("rev-parse", "--show-toplevel"); }
+  catch { console.error(`${deck} is not inside a git repository.`); process.exit(1); }
+  git("config", "filter.pindeck-ids.clean", FILTER);
+  const rel = path.relative(root, deck).split(path.sep).join("/");
+  const pattern = `${rel ? rel + "/" : ""}*.html`;
+  const attrFile = path.join(root, ".gitattributes");
+  const attrs = fs.existsSync(attrFile) ? fs.readFileSync(attrFile, "utf8") : "";
+  const line = `${pattern} filter=pindeck-ids`;
+  const added = !attrs.split("\n").some((l) => l.trim() === line);
+  if (added) fs.writeFileSync(attrFile, attrs + (attrs && !attrs.endsWith("\n") ? "\n" : "") + line + "\n");
+  console.log(`Git filter "pindeck-ids" configured in ${root} (local git config).`);
+  console.log(added ? `Added "${line}" to .gitattributes; commit that file.` : `.gitattributes already has "${line}".`);
+  process.exit(0);
+}
 const slide = arg || (cmd === "pdf" ? "handout" : "current");
 if (!["layout", "shot", "slides", "pdf"].includes(cmd)) {
-  console.error("Usage: node cli.mjs layout|shot <slide>  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation");
+  console.error("Usage: node cli.mjs layout|shot <slide>  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation  |  node cli.mjs git-setup [deck]");
   process.exit(2);
 }
 

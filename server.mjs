@@ -18,7 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
@@ -107,8 +107,32 @@ function runEidPass() {
       backedUp = true;
     }
     writeDeck(DECK_FILE, r.html);
+    refreshGit();
   }
   return r;
+}
+
+/* With the "pindeck-ids" git filter (`node cli.mjs git-setup`) git strips the ids from commits and
+   diffs. But git lists a file as modified whenever its size differs from what it recorded, without
+   comparing contents, and adding ids changes the size. So after adding ids PinDeck re-records the file
+   in git (`git add`), but only when that changes nothing: its content without ids must equal what git
+   already has staged. A file with real edits is left alone and shows as modified, as it should. */
+let gitFilter = null;   // null: not checked yet
+const git = (args, cb) => execFile("git", ["-C", DECK_DIR, ...args], { encoding: "utf8" }, (err, out) => cb(err, (out || "").trim()));
+function refreshGit() {
+  const run = () => git(["hash-object", `--path=${DECK_FILE}`, DECK_FILE], (e1, cleaned) => {
+    if (e1 || !cleaned) return;
+    git(["ls-files", "-s", "--", DECK_FILE], (e2, entry) => {
+      const staged = entry.split(/\s+/)[1];
+      if (!e2 && staged === cleaned) git(["add", "--", DECK_FILE], () => {});
+    });
+  });
+  if (gitFilter === null) {
+    git(["check-attr", "filter", "--", DECK_FILE], (err, out) => {
+      gitFilter = !err && /: filter: pindeck-ids$/.test(out);
+      if (gitFilter) run();
+    });
+  } else if (gitFilter) run();
 }
 function slideList() {
   const html = readDeck(DECK_FILE);

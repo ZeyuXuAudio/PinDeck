@@ -32,6 +32,20 @@ optional `<meta>` tags in the deck's `<head>` tell it about the design:
 Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
 `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
 
+## Keeping the ids out of git
+
+PinDeck adds `data-eid` attributes to the deck it opens. If the deck is in git, run once per clone:
+
+```bash
+node cli.mjs git-setup path/to/deck
+```
+
+This adds a line like `path/to/deck/*.html filter=pindeck-ids` to `.gitattributes` (commit it) and
+defines the filter in the clone's git config: git then strips the ids whenever it reads the deck's
+HTML. The ids stay in the file on disk, where PinDeck and Claude need them, but commits and diffs
+never contain them, and a change that only adds ids does not show in `git status`. Your own edits
+show and commit as usual. Clones without the filter configured simply see the file as it is.
+
 ## Working with it
 
 | Action | How |
@@ -92,7 +106,7 @@ the files changed. CSS changes are swapped in without a reload.
 | File | Purpose |
 |---|---|
 | `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
-| `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` and `pdf presentation` commands for Claude (and for you). |
+| `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` / `pdf presentation` commands for Claude (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
@@ -113,6 +127,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.9**: `node cli.mjs git-setup` keeps PinDeck's ids out of git with a clean filter; id-only
+  changes no longer show in `git status`.
 * **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu
   in the chat header; a + menu in the chat for files and screenshots.
 * **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption,
