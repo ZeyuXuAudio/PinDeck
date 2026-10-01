@@ -15,7 +15,7 @@ Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `clau
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
 screenshots. PinDeck has no npm dependencies.
 
-Options: `--port 5180`, `--model <name>` (otherwise Claude Code's default model), `--help`. The deck
+Options: `--port 5180`, `--model <name>` (otherwise the model chosen in the chat header, or Claude Code's default), `--help`. The deck
 folder defaults to the current folder and must contain `index.html`. Runtime files (chat history,
 screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), not in the deck.
 
@@ -41,10 +41,12 @@ Without them PinDeck runs no footer check and locks only `.slide-foot` and `.log
 | Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and Claude's changes. |
 | Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
 | Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". The selected element is sent too, so "make this smaller" works. `Enter` sends, `Shift+Enter` adds a new line. |
-| Visual questions | Tick "Include screenshot" to attach the current slide with the pin markers. |
+| Visual questions | **+** in the chat, then **Screenshot**: the current slide with its pin markers is attached when you send. |
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
-| Attach figures and audio | 📎 in the chat, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
+| New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
+| Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change; the choice is remembered. |
+| Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
@@ -98,7 +100,7 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.7
+## Limits of version 1.8
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
@@ -111,6 +113,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu
+  in the chat header; a + menu in the chat for files and screenshots.
 * **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption,
   and optionally the files nothing else uses; undo restores element and files. Claude reads attached
   images directly instead of trying to convert them; refused commands are explained in the chat.

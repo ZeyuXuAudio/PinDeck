@@ -65,6 +65,7 @@ window.__editorHost = {
     refreshPinsFromSlides();
     bridge.renderPins(state.pins);
     if (state.sel) bridge.selectEid(state.sel.eid);
+    if (state.pendingTitleEdit) { state.pendingTitleEdit = false; setTimeout(() => bridge.editTitle(), 50); }
     renderSlides();
     renderToolbar();
   },
@@ -220,12 +221,27 @@ $("select-toggle").onclick = () => setMode("select");
 $("undo").onclick = () => undoRedo("undo");
 $("redo").onclick = () => undoRedo("redo");
 /* ---- PDF export ---------------------------------------------------------------------------- */
-function setExportMenu(open) {
-  $("export-menu").hidden = !open;
-  $("export-btn").setAttribute("aria-expanded", String(open));
+/* Drop-down menus: one open at a time; an outside click or Esc closes them. */
+function setMenu(btn, menu, open) {
+  document.querySelectorAll(".menu").forEach((m) => {
+    const show = m === menu && open;
+    m.hidden = !show;
+    m.parentElement.querySelector("[aria-haspopup]")?.setAttribute("aria-expanded", String(show));
+  });
 }
-$("export-btn").onclick = (e) => { e.stopPropagation(); setExportMenu($("export-menu").hidden); };
-document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) setExportMenu(false); });
+function wireMenu(btnId, menuId, beforeOpen) {
+  $(btnId).addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = $(menuId).hidden;
+    if (open) beforeOpen?.();
+    setMenu($(btnId), $(menuId), open);
+  });
+}
+const closeMenus = () => setMenu(null, null, false);
+document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); }, true);
+const setExportMenu = (open) => setMenu($("export-btn"), $("export-menu"), open);
+wireMenu("export-btn", "export-menu");
 $("export-menu").addEventListener("click", async (e) => {
   const item = e.target.closest("[data-export]");
   if (!item) return;
@@ -433,7 +449,7 @@ async function send() {
     for (const i of idx) { try { layouts.push(await queueMeasure(i)); } catch {} }
     const s = state.slides[state.current];
     const res = await api("message", {
-      text, pins: state.pins, selection: state.sel, layouts, screenshot: $("shot").checked,
+      text, pins: state.pins, selection: state.sel, layouts, screenshot: state.shot || false,
       attachments: attachments.filter((a) => a.status === "ready").map(({ path, kind, name, bytes, width, height, duration,
         sampleRate, channels, waveform, droppedAt }) => ({ path, kind, name, bytes, width, height, duration, sampleRate, channels, waveform, droppedAt })),
       current: s ? { index: state.current, eid: s.eid } : null,
@@ -441,7 +457,7 @@ async function send() {
     if (!res.ok) { alert((await res.json()).error || "Could not send."); return; }
     $("input").value = "";
     autosize();
-    $("shot").checked = false;
+    state.shot = null;
     clearAttachments();
     state.pins = [];
     pinsChanged();
@@ -498,12 +514,13 @@ document.addEventListener("keydown", (e) => {
 function applyStatus(s) {
   state.status = s;
   setBusy(!!s.busy);
-  $("model").textContent = s.model ? `· ${s.model}` : "";
+  $("model").textContent = modelLabel(s);
+  $("model-btn").disabled = !!s.busy;
   $("conn").classList.toggle("on", !!s.running);
   $("conn").title = s.running ? "Claude Code is running" : "Claude Code starts with the next message";
-  $("shot").disabled = !s.chrome;
-  $("shot").parentElement.title = s.chrome ? "Attach a screenshot of the current slide with the pin markers"
-    : "Screenshots need Chrome or Chromium";
+  $("add-shot").disabled = !s.chrome;
+  $("add-shot").title = s.chrome ? "" : "Screenshots need Chrome or Chromium";
+  $("add-slide-btn").disabled = !!s.busy;
   renderToolbar();
 }
 function connect() {
@@ -554,6 +571,67 @@ function connect() {
     try { if ((await api("ping")).status === 403) location.reload(); } catch {}
   };
 }
+
+/* ---- New slides --------------------------------------------------------------------------------------
+   Content slide, section divider or a copy of the current slide, inserted after the current one and
+   modelled on the deck's own slides. The editor jumps to it and opens its title for typing. */
+wireMenu("add-slide-btn", "add-slide-menu", () => {
+  const cur = state.slides[state.current];
+  $("add-slide-menu").querySelector('[data-slide="duplicate"] span').textContent =
+    cur ? `A copy of slide ${state.current + 1} to start from` : "A copy to start from";
+});
+$("add-slide-menu").addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-slide]");
+  if (!item) return;
+  closeMenus();
+  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  flushNudge();
+  await editChain;
+  const after = state.slides[state.current]?.eid;
+  const res = await api("add-slide", { kind: item.dataset.slide, after });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || "Could not add the slide.");
+  state.current = d.index;   // the reload opens the new slide ...
+  state.pendingTitleEdit = item.dataset.slide !== "duplicate";   // ... with its title ready for typing
+  try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
+  loadMain();
+});
+
+/* ---- Model and effort --------------------------------------------------------------------------------- */
+const MODEL_CHOICES = [["", "Default", "Claude Code's default model"], ["opus", "Opus", "most capable, for layout and design work"],
+  ["sonnet", "Sonnet", "faster, lighter on usage limits"]];
+const EFFORT_CHOICES = [["", "Default", ""], ["low", "Low", "quick edits"], ["medium", "Medium", ""], ["high", "High", ""],
+  ["xhigh", "Extra high", ""], ["max", "Max", "slowest, most careful"]];
+function prettyModel(id) {
+  const m = /claude-(\w+)-(\d+)(?:-(\d+))?/.exec(id || "");
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] && m[3].length <= 2 ? "." + m[3] : ""}` : id || "";
+}
+function modelLabel(s) {
+  const st = s.settings || {};
+  const model = prettyModel(s.model) || MODEL_CHOICES.find((c) => c[0] === st.model)?.[1] || "";
+  return [model, st.effort ? EFFORT_CHOICES.find((c) => c[0] === st.effort)?.[1].toLowerCase() + " effort" : ""].filter(Boolean).join(" · ");
+}
+function renderModelMenu() {
+  const st = state.status.settings || {};
+  const opt = (key, [value, label, desc]) => `<button class="opt" role="menuitemradio" aria-checked="${st[key] === value}"
+      data-set="${key}" data-value="${value}"><span class="tick">${st[key] === value ? "✓" : ""}</span>
+      <strong>${label}</strong>${desc ? `<span class="d muted">${desc}</span>` : ""}</button>`;
+  $("model-menu").innerHTML = `<div class="group">Model</div>${MODEL_CHOICES.map((c) => opt("model", c)).join("")}
+    <div class="sep"></div><div class="group">Effort: how long Claude thinks</div>${EFFORT_CHOICES.map((c) => opt("effort", c)).join("")}
+    <div class="sep"></div><div class="group" style="text-transform:none;letter-spacing:0;font-weight:400">The conversation continues after a change.</div>`;
+}
+wireMenu("model-btn", "model-menu", renderModelMenu);
+$("model-menu").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-set]");
+  if (!b) return;
+  e.stopPropagation();
+  const res = await api("settings", { [b.dataset.set]: b.dataset.value });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || "Could not change the setting.");
+  state.status.settings = d.settings;
+  renderModelMenu();
+  $("model").textContent = modelLabel(state.status);
+});
 
 /* ---- Delete the selected element ---------------------------------------------------------------------
    Asks first. Lists the files the element uses; those nothing else in the deck uses can be deleted
@@ -691,7 +769,10 @@ function clearAttachments() {
   renderAttachments();
 }
 function renderAttachments() {
-  $("attach-tray").innerHTML = attachments.map((a) => {
+  const shot = state.shot ? `<span class="att" title="A screenshot is taken when you send the message">
+      <span class="icon-box">📷</span><span class="meta"><b>Screenshot</b><span>slide ${state.shot.index + 1}, with its pins</span></span>
+      <button class="x" data-unshot aria-label="Remove the screenshot">×</button></span>` : "";
+  $("attach-tray").innerHTML = shot + attachments.map((a) => {
     const info = a.status === "uploading" ? "uploading…" : a.status === "error" ? a.error
       : [a.kind === "image" && a.width ? `${a.width} × ${a.height}` : "", a.duration ? `${a.duration.toFixed(1)} s` : "",
          fmtBytes(a.bytes), a.droppedAt ? `dropped on slide ${a.droppedAt.slide.index + 1}` : ""].filter(Boolean).join(" · ");
@@ -705,8 +786,18 @@ function renderAttachments() {
 $("attach-tray").addEventListener("click", (e) => {
   const x = e.target.closest("[data-unattach]");
   if (x) removeAttachment(+x.dataset.unattach);
+  if (e.target.closest("[data-unshot]")) { state.shot = null; renderAttachments(); }
 });
-$("attach").onclick = () => $("file-input").click();
+/* The + menu in the composer: a file, or a screenshot of the current slide */
+wireMenu("add-btn", "add-menu");
+$("add-menu").addEventListener("click", (e) => {
+  const item = e.target.closest("[data-add]");
+  if (!item || item.disabled) return;
+  closeMenus();
+  if (item.dataset.add === "file") return $("file-input").click();
+  const s = state.slides[state.current];
+  if (s) { state.shot = { index: state.current, eid: s.eid }; renderAttachments(); }
+});
 $("file-input").onchange = () => { attachFiles($("file-input").files); $("file-input").value = ""; };
 $("input").addEventListener("paste", (e) => {
   const files = [...(e.clipboardData?.files || [])];

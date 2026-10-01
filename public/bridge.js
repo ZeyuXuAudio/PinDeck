@@ -583,12 +583,12 @@
     if (t.why) return host()?.toast(t.why);
     startEdit(t, x, y);
   }
-  function editSelection() {
+  function editSelection(opts) {
     if (!sel) return false;
     const t = textTargetOf(sel.el);
     if (!t) return false;
     if (t.why) { host()?.toast(t.why); return true; }
-    startEdit(t);
+    startEdit(t, null, null, opts);
     return true;
   }
 
@@ -627,6 +627,11 @@
         const p = document.caretPositionFromPoint(x, y);
         if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); }
       }
+    }
+    if (where === "placeholder") {   // select the first piece of text, so typing replaces it
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.nodeValue.trim() ? 1 : 3) });
+      const first = w.nextNode();
+      if (first) { r = document.createRange(); r.selectNodeContents(first); }
     }
     if (!r || !el.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(el); r.collapse(where === "start"); }
     s.removeAllRanges();
@@ -815,6 +820,14 @@
     const api = {
       info, goto, indices, highlight, reloadCss,
       setMode, selectEid, nudge, editSelection,
+      // a new slide: select its title and open it for typing
+      editTitle() {
+        const sec = Reveal.getCurrentSlide();
+        const h = sec?.querySelector("h1[data-eid], h2[data-eid], h3[data-eid]");
+        if (!h || mode !== "select") return;
+        select(h, sec);
+        editSelection({ caret: "placeholder" });
+      },
       finishEdit: () => finishEdit(true),
       isEditing: () => !!editing,
       deselect() { select(null, null); },

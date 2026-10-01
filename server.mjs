@@ -20,7 +20,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -243,7 +243,16 @@ function addEntry(entry) {
 }
 const liveTurns = () => state.turns.filter((t) => !t.undone);
 const changeLabel = (t) => (t ? (t.kind === "manual" ? t.label : "Claude's change") : null);
-const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId,
+/* Model and effort for the Claude Code session, chosen in the chat header; kept across restarts. */
+const MODELS = ["", "opus", "sonnet"];                         // "" = Claude Code's default
+const EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
+const SETTINGS_FILE = path.join(HOME_DIR, "settings.json");
+const settings = { model: "", effort: "" };
+try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"))); } catch {}
+if (MODEL) settings.model = MODEL;   // --model on the command line wins
+const saveSettings = () => fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), () => {});
+
+const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId, settings: { ...settings },
   running: session.running, deck: DECK_DIR, chrome: !!CHROME,
   undo: changeLabel(liveTurns().at(-1)), redo: changeLabel(state.redo.at(-1)) });
 const pushStatus = () => broadcast("status", status());
@@ -254,12 +263,13 @@ let stderrTail = "";
 const session = new ClaudeSession({
   cwd: DECK_DIR,
   env: { DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN },
-  args: [
+  args: () => [
     "--append-system-prompt", systemPrompt,
     "--permission-mode", "default",
     "--allowedTools", "Read", "Glob", "Grep", ...EDITABLE.map((f) => `Edit(./${f})`), `Bash(${CLI_CMD}:*)`,
     "--disallowedTools", ...LOCKED.flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
-    ...(MODEL ? ["--model", MODEL] : []),
+    ...(settings.model ? ["--model", settings.model] : []),
+    ...(settings.effort ? ["--effort", settings.effort] : []),
   ],
   onStderr: (s) => { stderrTail = (stderrTail + s).slice(-2000); },
   onEvent: handleEvent,
@@ -557,8 +567,9 @@ const server = http.createServer(async (req, res) => {
       const b = await body(req);
       if (!b.text?.trim()) return json(res, 400, { error: "Empty message." });
       let screenshot = null;
-      if (b.screenshot && b.current) {
-        try { screenshot = { slide: b.current.index + 1, path: await takeShot(b.current) }; }
+      const shotSlide = typeof b.screenshot === "object" && b.screenshot?.eid ? b.screenshot : b.screenshot ? b.current : null;
+      if (shotSlide) {
+        try { screenshot = { slide: shotSlide.index + 1, path: await takeShot(shotSlide) }; }
         catch (e) { addEntry({ kind: "notice", text: "Screenshot failed: " + e.message }); }
       }
       const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
@@ -599,6 +610,36 @@ const server = http.createServer(async (req, res) => {
         fs.rmSync(path.join(DECK_DIR, rel), { force: true });
       }
       return json(res, 200, {});
+    }
+    if (p === "/api/settings" && req.method === "POST") {
+      const b = await body(req);
+      const model = b.model ?? settings.model, effort = b.effort ?? settings.effort;
+      if (!MODELS.includes(model) || !EFFORTS.includes(effort)) return json(res, 400, { error: "Unknown model or effort." });
+      if (model === settings.model && effort === settings.effort) return json(res, 200, { settings });
+      if (state.busy) return json(res, 409, { error: "Wait until Claude has finished, then change the model or effort." });
+      Object.assign(settings, { model, effort });
+      saveSettings();
+      // restart the session with the new flags; --resume keeps the conversation
+      if (session.running) { session.stop(); setTimeout(ensureSession, 300); }
+      addEntry({ kind: "notice", text: `Model: ${model || "default"}, effort: ${effort || "default"}. The conversation continues.` });
+      pushStatus();
+      return json(res, 200, { settings });
+    }
+    if (p === "/api/add-slide" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      if (!["content", "section", "duplicate"].includes(b.kind)) return json(res, 400, { error: "Unknown slide kind." });
+      const before = snapshot(EDITABLE);
+      const r = insertSlide(before[DECK_FILE], b.kind, b.after);
+      if (r.error) return json(res, 409, { error: r.error });
+      const html = assignEids(r.html).html;
+      const slide = findSlides(parse(html))[r.index];
+      const eid = slide.attrs["data-eid"].value;
+      const what = { content: "content slide", section: "section divider", duplicate: "copy of the slide" }[b.kind];
+      const turnId = recordHandEdit(before, html, `Added a ${what} (slide ${r.index + 1})`,
+        `The user added a ${what} as slide ${r.index + 1} (${eid})` + (b.kind === "duplicate" ? `, a copy of ${b.after}.` : " with placeholder text."),
+        { manual: true });   // the editor reloads itself and opens the new slide; no second reload from the watcher
+      return json(res, 200, { turnId, index: r.index, eid });
     }
     if (p === "/api/stop" && req.method === "POST") {
       if (state.busy && session.running) {

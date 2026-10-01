@@ -13,6 +13,14 @@
   <!-- Left: slides -->
   <nav class="slides-pane" aria-label="Slides">
     <div class="pane-head"><span class="brand"><span class="brand-pin" aria-hidden="true"></span>PinDeck</span> <span id="slide-count" class="muted"></span></div>
+    <div class="slides-actions menu-wrap">
+      <button id="add-slide-btn" class="add-slide" aria-haspopup="menu" aria-expanded="false" title="Add a slide after the current one">＋ New slide</button>
+      <div id="add-slide-menu" class="menu left" role="menu" hidden>
+        <button role="menuitem" data-slide="content"><strong>Content slide</strong><span>Title and bullets, in the style of this deck</span></button>
+        <button role="menuitem" data-slide="section"><strong>Section divider</strong><span>Opens a new part of the talk</span></button>
+        <button role="menuitem" data-slide="duplicate"><strong>Duplicate this slide</strong><span>A copy to start from</span></button>
+      </div>
+    </div>
     <ol id="slide-list" class="slide-list"></ol>
   </nav>
 
@@ -54,7 +62,11 @@
   <!-- Right: chat with Claude -->
   <aside class="chat-pane" aria-label="Claude">
     <div class="pane-head chat-head">
-      <span>Claude <span id="model" class="muted"></span></span>
+      <span class="menu-wrap">
+        <button id="model-btn" class="model-btn" aria-haspopup="menu" aria-expanded="false"
+          title="Model and effort for Claude">Claude <span id="model" class="muted"></span> ▾</button>
+        <div id="model-menu" class="menu left model-menu" role="menu" hidden></div>
+      </span>
       <span class="head-actions">
         <span id="conn" class="conn" title="Claude Code session"></span>
         <button id="new-chat" class="small" title="Start a new conversation">New chat</button>
@@ -67,7 +79,7 @@
           <em>“1: align with 2, make 3 smaller”</em>.</p>
         <p>Or edit yourself: click to select, drag to move, pull a handle to resize, arrow keys to nudge,
           double-click to change the text. A selected element is what Claude takes “this” to mean.</p>
-        <p>Attach figures or audio with 📎, drag and drop or paste; Claude can put them on a slide.</p>
+        <p>Add figures, audio or a screenshot with <strong>+</strong>, or drag and drop or paste a file; Claude can put it on a slide.</p>
         <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
           <code>brand.css</code> is locked.</p>
       </div>
@@ -79,10 +91,15 @@
       <div id="attach-tray" class="attach-tray"></div>
       <textarea id="input" rows="3" placeholder="Ask Claude… refer to pins by number (1, 2, …)"></textarea>
       <div class="composer-row">
-        <button id="attach" class="icon" title="Attach a figure or audio file (or drop it on the chat or a slide, or paste an image)" aria-label="Attach a file">📎</button>
+        <span class="menu-wrap">
+          <button id="add-btn" class="add-round" aria-haspopup="menu" aria-expanded="false" aria-label="Add to the message"
+            title="Add a file or a screenshot to the message">+</button>
+          <div id="add-menu" class="menu up" role="menu" hidden>
+            <button role="menuitem" data-add="file"><strong>File…</strong><span>A figure or audio file for Claude to put on a slide (or drop or paste it)</span></button>
+            <button role="menuitem" data-add="shot" id="add-shot"><strong>Screenshot</strong><span>This slide with its pins, for questions about how it looks</span></button>
+          </div>
+        </span>
         <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg" hidden>
-        <label class="check" title="Attach a screenshot of the current slide with the pin markers (for visual questions)">
-          <input type="checkbox" id="shot"> Include screenshot</label>
         <span class="spacer"></span>
         <button id="clear-pins" class="small" hidden>Clear pins</button>
         <button id="send" class="primary">Send</button>
