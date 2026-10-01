@@ -92,6 +92,19 @@
   </aside>
 </div>
 
+<dialog id="delete-dialog" class="delete-dialog">
+  <form method="dialog">
+    <h3 id="delete-title">Delete this element?</h3>
+    <p id="delete-what" class="muted"></p>
+    <div id="delete-files"></div>
+    <p class="muted small-note">You can undo this with ⌘Z.</p>
+    <div class="dialog-buttons">
+      <button value="cancel" autofocus>Cancel</button>
+      <button value="delete" class="danger" id="delete-confirm">Delete</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="diff-dialog" class="diff-dialog">
   <div class="dialog-head"><span id="diff-title">Changes</span><button class="small" id="diff-close">Close</button></div>
   <pre id="diff-body" class="diff"></pre>

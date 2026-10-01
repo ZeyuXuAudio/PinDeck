@@ -857,6 +857,11 @@
       window.addEventListener("keydown", (e) => {
         if (e.target.closest?.("input, textarea, [contenteditable]")) return;
         const k = e.key, meta = e.metaKey || e.ctrlKey;
+        if (sel && mode === "select" && !meta && (k === "Delete" || k === "Backspace")) {
+          e.preventDefault(); e.stopImmediatePropagation();
+          host()?.requestDelete(sel.el.dataset.eid);
+          return;
+        }
         // arrows nudge the selection (Shift: 10 px) instead of changing slides
         if (sel && mode === "select" && !meta && k.startsWith("Arrow")) {
           e.preventDefault(); e.stopImmediatePropagation();

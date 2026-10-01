@@ -119,6 +119,7 @@ window.__editorHost = {
   },
   refresh() { editChain = editChain.then(() => loadMain()); },
   editingChanged(on) { state.editing = on; },
+  requestDelete(eid) { requestDelete(eid); },
   dropFiles(files, at) { attachFiles(files, at); },
   dragOver(on) { $("drop-hint").hidden = !on; },
   toast(msg) { toast(msg); },
@@ -359,7 +360,8 @@ function entryHtml(e) {
         if (t?.undone) parts.push("<span>undone</span>");
       } else if (!e.error) parts.push("No file changes");
       if (e.restored?.length) parts.push(`<span class="warn">${esc(e.restored.join(", "))} is locked; the change was reverted.</span>`);
-      if (e.denials?.length) parts.push(`<span class="warn">Blocked: ${e.denials.map((d) => esc(`${d.name} ${d.detail}`)).join(", ")}</span>`);
+      if (e.denials?.length) parts.push(`<span class="warn" title="PinDeck lets Claude run only its own commands (layout, shot, slides, pdf) and edit index.html and theme.css">` +
+        `Not allowed in PinDeck, so skipped: ${e.denials.map((d) => esc(`${d.name} ${d.detail}`)).join(", ")}</span>`);
       if (e.duration) parts.push(`<span class="meta">${(e.duration / 1000).toFixed(1)} s</span>`);
       return parts.join(" ");
     }
@@ -473,6 +475,7 @@ function handleKey(k, mod = {}) {
   else if (k === "v" || k === "V") setMode("select");
   else if (k === "Escape") { if (state.mode === "pin") setMode("select"); else main?.bridge.deselect(); }
   else if (k === "Enter") { if (!(state.sel && state.mode === "select" && main?.bridge.editSelection())) $("input").focus(); }
+  else if ((k === "Delete" || k === "Backspace") && state.sel && state.mode === "select") requestDelete(state.sel.eid);
   else if (k.startsWith("Arrow") && state.sel && state.mode === "select") {
     const step = mod.shift ? 10 : 1;
     main?.bridge.nudge(k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0, k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0);
@@ -485,7 +488,7 @@ document.addEventListener("keydown", (e) => {
   const meta = e.metaKey || e.ctrlKey;
   if (meta && (e.key === "z" || e.key === "Z")) { e.preventDefault(); return handleKey(e.key, { meta, shift: e.shiftKey }); }
   if (meta || e.altKey) return;
-  if (["p", "P", "v", "V", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(e.key)) {
+  if (["p", "P", "v", "V", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Delete", "Backspace"].includes(e.key)) {
     e.preventDefault();
     handleKey(e.key, { shift: e.shiftKey });
   }
@@ -550,6 +553,52 @@ function connect() {
   es.onerror = async () => {
     try { if ((await api("ping")).status === 403) location.reload(); } catch {}
   };
+}
+
+/* ---- Delete the selected element ---------------------------------------------------------------------
+   Asks first. Lists the files the element uses; those nothing else in the deck uses can be deleted
+   with it (ticked by default). Undo brings back the element and the files. */
+let deleting = false;
+async function requestDelete(eid) {
+  if (deleting || !eid) return;
+  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  deleting = true;
+  try {
+    flushNudge();
+    await editChain;
+    const res = await api(`delete-info?${new URLSearchParams({ eid })}`);
+    const info = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(info.error || "Cannot delete this element.");
+    const name = info.eid.replace(/^[^/]+\//, "/");
+    const slide = state.slides.findIndex((s) => info.eid === s.eid || info.eid.startsWith(s.eid + "/"));
+    const isFig = info.tag.startsWith("figure") && info.eid !== eid;
+    $("delete-title").textContent = isFig ? "Delete this figure?" : `Delete ${name}?`;
+    $("delete-what").textContent = `${isFig ? `The picture and its caption (${name})` : info.tag}` +
+      (slide >= 0 ? ` on slide ${slide + 1}` : "") + " will be removed from the slide.";
+    $("delete-files").innerHTML = info.files.map((f, i) => f.usedElsewhere
+      ? `<div class="file kept"><span>📄</span><span><code>${esc(f.rel)}</code>
+           <span class="why">Still used elsewhere in the deck, so it is kept.</span></span></div>`
+      : `<label class="file"><input type="checkbox" data-file="${esc(f.rel)}" checked>
+           <span>Also delete <code>${esc(f.rel)}</code> (${fmtBytes(f.bytes)})
+           <span class="why">Not used anywhere else in the deck.</span></span></label>`).join("");
+    const choice = await new Promise((resolve) => {
+      const d = $("delete-dialog");
+      d.addEventListener("close", () => resolve(d.returnValue), { once: true });
+      d.returnValue = "cancel";
+      d.showModal();
+    });
+    if (choice !== "delete") return;
+    const files = [...$("delete-files").querySelectorAll("input[data-file]:checked")].map((c) => c.dataset.file);
+    const r2 = await api("delete", { eid, files });
+    const d2 = await r2.json().catch(() => ({}));
+    if (!r2.ok) return toast(d2.error || "Could not delete the element.");
+    main?.bridge.deselect();
+    state.sel = null;
+    renderPinTray();
+    toast(`Deleted ${name}${d2.files.length ? ` and ${d2.files.length === 1 ? d2.files[0] : d2.files.length + " files"}` : ""}. ⌘Z to undo.`, { ms: 4500 });
+  } finally {
+    deleting = false;
+  }
 }
 
 /* ---- Attachments: figures and audio for the next message -------------------------------------------

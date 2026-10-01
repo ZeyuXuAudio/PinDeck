@@ -20,7 +20,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -371,7 +371,7 @@ const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max
 function formatAttachment(a) {
   if (a.kind === "image")
     return `- ${a.path}: image${a.width ? `, ${a.width} × ${a.height} px` : ""}, ${kb(a.bytes)}` +
-      (/\.(png|jpe?g|gif|webp)$/i.test(a.path) ? ". Read it to see it." : a.path.endsWith(".svg") ? " (SVG, readable as text)." : ".");
+      (/\.(png|jpe?g|gif|webp)$/i.test(a.path) ? ". Read it directly to see it (no resizing needed)." : a.path.endsWith(".svg") ? " (SVG, readable as text)." : ".");
   const meta = [a.duration ? `${a.duration.toFixed(1)} s` : "", a.sampleRate ? `${Math.round(a.sampleRate / 1000)} kHz` : "",
     a.channels ? (a.channels === 1 ? "mono" : `${a.channels} channels`) : "", kb(a.bytes)].filter(Boolean).join(", ");
   return `- ${a.path}: audio, ${meta}` + (a.waveform ? `; waveform image ${a.waveform} (bars, viewBox 1000 × 120) for an audio player with waveform.` : ".");
@@ -428,11 +428,11 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
 });
 
 /* ---- Hand edits ----------------------------------------------------------------------------------------- */
-function recordHandEdit(before, html, label, note) {
-  writeDeck(DECK_FILE, html, true);
+function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [] } = {}) {
+  writeDeck(DECK_FILE, html, manual);
   const after = snapshot(EDITABLE);
   const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
-  const t = { id: state.seq + 1, kind: "manual", label, before, after,
+  const t = { id: state.seq + 1, kind: "manual", label, before, after, deletedFiles,
     files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
   state.turns.push(t);
   state.redo = [];
@@ -442,6 +442,24 @@ function recordHandEdit(before, html, label, note) {
   return t.id;
 }
 
+/* What deleting an element would remove, and which of its files nothing else uses. Files outside the
+   deck folder, in vendor/, or still referenced elsewhere (index.html, theme.css) are never offered. */
+function deletePlan(eid) {
+  const html = readDeck(DECK_FILE);
+  const target = deleteTarget(html, eid);
+  if (!target) return null;
+  const rest = removeElement(html, target.eid);
+  const css = (readDeck("theme.css") || "") + (readDeck("brand.css") || "");
+  const files = fileRefs(target.outer).flatMap((ref) => {
+    const abs = path.resolve(DECK_DIR, ref);
+    const rel = path.relative(DECK_DIR, abs).split(path.sep).join("/");
+    if (rel.startsWith("..") || rel.startsWith("vendor/") || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return [];
+    const usedElsewhere = fileRefs(rest).some((r) => path.resolve(DECK_DIR, r) === abs) || css.includes(ref) || css.includes(rel);
+    return [{ rel, bytes: fs.statSync(abs).size, usedElsewhere }];
+  });
+  return { ...target, html: rest, files };
+}
+
 /* ---- Undo (Claude's turns and hand edits share one history) ---------------------------------------- */
 function undo(res) {
   if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
@@ -449,6 +467,10 @@ function undo(res) {
   if (!t) return json(res, 409, { error: "Nothing to undo." });
   const edited = EDITABLE.some((f) => readDeck(f) !== t.after[f]);
   for (const f of EDITABLE) if (t.before[f] != null && readDeck(f) !== t.before[f]) writeDeck(f, t.before[f]);
+  for (const { rel, data } of t.deletedFiles || []) {   // files deleted with an element come back too
+    fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
+    fs.writeFileSync(path.join(DECK_DIR, rel), data);
+  }
   t.undone = true;
   state.redo.push(t);
   state.notes.push(t.kind === "manual"
@@ -617,12 +639,37 @@ const server = http.createServer(async (req, res) => {
       }
       state.redo.pop();
       for (const f of EDITABLE) if (t.after[f] != null) writeDeck(f, t.after[f]);
+      for (const { rel } of t.deletedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });
       t.undone = false;
       state.notes.push(t.kind === "manual" ? `The user redid their hand edit: ${t.label}.`
         : `The user redid your change from turn ${t.id} after undoing it.`);
       broadcast("undone", { turnId: t.id, undone: false });
       pushStatus();
       return json(res, 200, {});
+    }
+
+    // Delete an element (and, if the user agrees, the files only it uses)
+    if (p === "/api/delete-info") {
+      const plan = deletePlan(url.searchParams.get("eid"));
+      if (!plan) return json(res, 404, { error: "Element not found in the file." });
+      return json(res, 200, { eid: plan.eid, tag: plan.tag, files: plan.files });
+    }
+    if (p === "/api/delete" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const plan = deletePlan(b.eid);
+      if (!plan) return json(res, 404, { error: "Element not found in the file." });
+      const before = snapshot(EDITABLE);
+      const wanted = new Set(b.files || []);
+      const deletedFiles = plan.files.filter((f) => wanted.has(f.rel) && !f.usedElsewhere)
+        .map((f) => ({ rel: f.rel, data: fs.readFileSync(path.join(DECK_DIR, f.rel)) }));
+      const short = plan.eid.replace(/^[^/]+\//, "/");
+      const label = `Deleted ${short}` + (deletedFiles.length ? ` and ${deletedFiles.map((f) => f.rel).join(", ")}` : "");
+      const turnId = recordHandEdit(before, plan.html, label,
+        `The user deleted ${plan.eid} (${plan.tag}) by hand` + (deletedFiles.length ? `, together with the file(s) ${deletedFiles.map((f) => f.rel).join(", ")}` : "") + ".",
+        { manual: false, deletedFiles });
+      for (const f of deletedFiles) fs.rmSync(path.join(DECK_DIR, f.rel), { force: true });
+      return json(res, 200, { turnId, deleted: plan.eid, files: deletedFiles.map((f) => f.rel) });
     }
 
     // Hand edits from the editor: drag/resize (inline styles) and text

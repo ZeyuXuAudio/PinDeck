@@ -166,6 +166,21 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .composer-row .spacer { flex: 1; }
 .check { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
 
+/* ---- Delete confirmation ---- */
+.delete-dialog { width: min(460px, 92vw); padding: 0; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25); }
+.delete-dialog::backdrop { background: rgba(20,22,25,.35); }
+.delete-dialog form { padding: 18px 20px 16px; }
+.delete-dialog h3 { margin: 0 0 6px; font-size: 16px; }
+.delete-dialog p { margin: 0 0 10px; }
+.delete-dialog .file { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; margin: 0 0 6px;
+  background: var(--bg); border-radius: 8px; font-size: 13px; }
+.delete-dialog .file code { font-size: 12px; }
+.delete-dialog .file .why { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.delete-dialog .file.kept { opacity: .75; }
+.small-note { font-size: 12.5px; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
 /* ---- Diff ---- */
 .diff-dialog { width: min(1000px, 92vw); max-height: 86vh; padding: 0; border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 20px 60px rgba(0,0,0,.25); }

@@ -29,8 +29,13 @@ The user can attach figures and audio to a message. PinDeck has already saved th
 `figures/` folder; <editor-context> lists their paths (relative to index.html), size and, for audio,
 the duration and a generated waveform SVG. If a file was dropped onto a slide, the drop position is
 given too. Put them on slides with the deck's existing patterns: a figure like the other `figure.fig`
-blocks, audio like the deck's audio demo (audio element, play button, waveform). Read an image to
-see what it shows before you write a caption. Do not rename or move the files.
+blocks, audio like the deck's audio demo (audio element, play button, waveform). Read an image
+directly to see what it shows before you write a caption: Read scales large photos down itself, so
+never convert or resize files first. Do not rename or move the files.
+
+## Commands
+The only shell commands you can run here are the PinDeck commands below ({{CLI}} ...). Anything
+else (sips, convert, python, ls, ...) is refused, so do not try; use Read, Grep and Glob instead.
 
 ## Checking your work
 The browser reloads by itself when you save. After changing positions, sizes, fonts or content

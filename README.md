@@ -36,7 +36,7 @@ Without them PinDeck runs no footer check and locks only `.slide-foot` and `.log
 
 | Action | How |
 |---|---|
-| Select, move, resize | Select mode (`V`, the default): click an element to select it, drag to move, pull a handle to resize. Elements snap to the slide edges and centre, the footer rule and other elements (pink guides); hold `Alt` to turn snapping off, `Shift` to move along one axis. Images keep their aspect ratio (`Shift` toggles). Arrow keys nudge by 1 px, `Shift`+arrows by 10 px. |
+| Select, move, resize | Select mode (`V`, the default): click an element to select it, drag to move, pull a handle to resize. Elements snap to the slide edges and centre, the footer rule and other elements (pink guides); hold `Alt` to turn snapping off, `Shift` to move along one axis. Images keep their aspect ratio (`Shift` toggles). Arrow keys nudge by 1 px, `Shift`+arrows by 10 px. `Delete` removes the selected element after a confirmation; a picture goes with its caption, and files nothing else in the deck uses can be deleted with it. `⌘Z` brings both back. |
 | Edit text | Double-click the text (or select it and press `Enter`). The element shows its source, so math appears as TeX, e.g. `\(\mu=0.5\)`. `Enter` or a click elsewhere saves, `Esc` cancels, `Shift+Enter` adds a line break, `⌘B` / `⌘I` make text bold or italic. In a bullet, `Enter` splits it at the cursor and continues in a new bullet below; `Enter` on an empty new bullet removes it and stops. Pasted text arrives as plain text. Table cells are edited one at a time. |
 | Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and Claude's changes. |
 | Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
@@ -98,7 +98,7 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.6
+## Limits of version 1.7
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
@@ -111,6 +111,9 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption,
+  and optionally the files nothing else uses; undo restores element and files. Claude reads attached
+  images directly instead of trying to convert them; refused commands are explained in the chat.
 * **1.6**: attach figures and audio to chat messages (file picker, drag and drop, paste); audio gets a
   waveform SVG; files dropped on a slide carry their position.
 * **1.5**: PDF export (handout and presentation with build steps on separate pages).
