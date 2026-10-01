@@ -305,3 +305,29 @@ export function setStyles(html, edits) {
   for (const o of ops) out = out.slice(0, o.start) + o.replace + out.slice(o.end);
   return { html: out, changed: true, missing };
 }
+
+/* ---- Text edits (inline editing in the editor) --------------------------------------------- */
+
+/* The element with this id, or a descendant reached by element-child indices (path), e.g. a
+   table cell [2] under a row that has the id. */
+function nodeAt(html, eid, path = []) {
+  let node = null;
+  walk(parse(html), (c) => { if (node) return false; if (c.attrs?.["data-eid"]?.value === eid) { node = c; return false; } });
+  for (const i of path) node = node?.children[i] || null;
+  return node && node.closeStart >= 0 ? node : null;
+}
+
+/* Inner HTML of an element exactly as written in the source (math still as TeX). */
+export function getInner(html, eid, path) {
+  const node = nodeAt(html, eid, path);
+  return node ? html.slice(node.contentStart, node.closeStart) : null;
+}
+
+/* Replaces the inner HTML of one element. Returns { html, changed } or null if not found. */
+export function setInner(html, eid, path, inner) {
+  const node = nodeAt(html, eid, path);
+  if (!node) return null;
+  const old = html.slice(node.contentStart, node.closeStart);
+  if (old === inner) return { html, changed: false };
+  return { html: html.slice(0, node.contentStart) + inner + html.slice(node.closeStart), changed: true };
+}

@@ -39,6 +39,8 @@ The user can also select, move and resize elements in the editor. Those changes 
 inline styles on the element in index.html: `translate: Xpx Ypx` for moves, `width`/`height` (and
 `max-width`/`max-height: none`) for sizes. You get a note about each one. Treat them as intended;
 keep them unless asked. If the user asks to clean up, move them into proper CSS rules.
+The user can also edit text in place (double-click); you get a note with the new text. Keep their
+wording unless asked to change it.
 A selected element is listed in <editor-context>; "this" or "it" usually means that element.
 
 ## Replies

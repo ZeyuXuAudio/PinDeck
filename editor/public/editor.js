@@ -87,6 +87,22 @@ window.__editorHost = {
   key(k, mod) { handleKey(k, mod); },
   selectionChanged(info) { state.sel = info; renderPinTray(); },
   commitEdit(op, label) { commitEdit(op, label); },
+  async textSource(eid, path) {
+    flushNudge();
+    await editChain;
+    const res = await api(`source?${new URLSearchParams({ eid, path: JSON.stringify(path || []) })}`);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(d.error || "Could not load the text."); return null; }
+    return d.html;
+  },
+  commitText(edit) {
+    editChain = editChain.then(async () => {
+      const res = await api("text", edit);
+      if (!res.ok) toast((await res.json().catch(() => ({}))).error || "Could not save the text.");
+      loadMain();   // re-render: math, footer numbers, and the file as saved
+    });
+  },
+  editingChanged(on) { state.editing = on; },
   toast(msg) { toast(msg); },
 };
 
@@ -401,7 +417,7 @@ function handleKey(k, mod = {}) {
   if (k === "p" || k === "P") setMode(state.mode === "pin" ? "select" : "pin");
   else if (k === "v" || k === "V") setMode("select");
   else if (k === "Escape") { if (state.mode === "pin") setMode("select"); else main?.bridge.deselect(); }
-  else if (k === "Enter") $("input").focus();
+  else if (k === "Enter") { if (!(state.sel && state.mode === "select" && main?.bridge.editSelection())) $("input").focus(); }
   else if (k.startsWith("Arrow") && state.sel && state.mode === "select") {
     const step = mod.shift ? 10 : 1;
     main?.bridge.nudge(k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0, k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0);

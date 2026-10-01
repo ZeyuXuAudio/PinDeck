@@ -18,7 +18,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -376,6 +376,21 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
   }, 120);
 });
 
+/* ---- Hand edits ----------------------------------------------------------------------------------------- */
+function recordHandEdit(before, html, label, note) {
+  writeDeck(DECK_FILE, html, true);
+  const after = snapshot(EDITABLE);
+  const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
+  const t = { id: state.seq + 1, kind: "manual", label, before, after,
+    files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
+  state.turns.push(t);
+  state.redo = [];
+  addEntry({ kind: "edit", turnId: t.id, label, files: t.files });
+  state.notes.push(note);
+  pushStatus();
+  return t.id;
+}
+
 /* ---- Undo (Claude's turns and hand edits share one history) ---------------------------------------- */
 function undo(res) {
   if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
@@ -518,7 +533,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {});
     }
 
-    // Drag and resize: inline style changes from the editor
+    // Hand edits from the editor: drag/resize (inline styles) and text
     if (p === "/api/edit" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
@@ -526,17 +541,27 @@ const server = http.createServer(async (req, res) => {
       const r = setStyles(before[DECK_FILE], b.ops || []);
       if (r.missing.length) return json(res, 404, { error: `No element ${r.missing.join(", ")} in ${DECK_FILE}.` });
       if (!r.changed) return json(res, 200, { unchanged: true });
-      writeDeck(DECK_FILE, r.html, true);
-      const after = snapshot(EDITABLE);
-      const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
-      const t = { id: state.seq + 1, kind: "manual", label: String(b.label || "Edited layout").slice(0, 200),
-        before, after, files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
-      state.turns.push(t);
-      state.redo = [];
-      addEntry({ kind: "edit", turnId: t.id, label: t.label, files: t.files });
-      state.notes.push(`The user edited the layout by hand: ${t.label}. This is an inline style on the element in ${DECK_FILE}.`);
-      pushStatus();
-      return json(res, 200, { turnId: t.id });
+      const label = String(b.label || "Edited layout").slice(0, 200);
+      const turnId = recordHandEdit(before, r.html, label,
+        `The user edited the layout by hand: ${label}. This is an inline style on the element in ${DECK_FILE}.`);
+      return json(res, 200, { turnId });
+    }
+    if (p === "/api/source") {
+      const html = getInner(readDeck(DECK_FILE), url.searchParams.get("eid"), JSON.parse(url.searchParams.get("path") || "[]"));
+      return html == null ? json(res, 404, { error: "Element not found in the file." }) : json(res, 200, { html });
+    }
+    if (p === "/api/text" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const r = setInner(before[DECK_FILE], b.eid, b.path || [], String(b.html ?? ""));
+      if (!r) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
+      if (!r.changed) return json(res, 200, { unchanged: true });
+      const label = String(b.label || "Edited text").slice(0, 200);
+      const where = b.eid + (b.path?.length ? ` (cell ${b.path.map((i) => i + 1).join("/")})` : "");
+      const turnId = recordHandEdit(before, r.html, label,
+        `The user edited the text of ${where} by hand. It now reads: "${String(b.text || "").slice(0, 300)}".`);
+      return json(res, 200, { turnId });
     }
 
     // CLI endpoints (used by Claude Code via cli.mjs)

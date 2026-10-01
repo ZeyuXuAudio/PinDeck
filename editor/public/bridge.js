@@ -1,7 +1,7 @@
 /* Editor bridge, injected into the deck page by the editor server (never saved to the deck).
 
    Modes (?editor=...):
-     main     the visible slide in the editor: navigation, selection, drag and resize, pins
+     main     the visible slide in the editor: navigation, selection, drag and resize, text editing, pins
      measure  hidden 1280x720 copy used to measure any slide without moving the user's view
      shot     headless screenshot of one slide, with pin markers
      dump     headless measurement; writes the result into the DOM for --dump-dom */
@@ -55,7 +55,13 @@
     .__guide.h { left:0; width:100%; height:calc(1px*var(--u,1)); }
     html.__selmode .reveal .slides section * { cursor:default; }
     html.__selmode .reveal .slides section .__selected, html.__selmode.__dragging * { cursor:move !important; }
-    html.__selmode .reveal .slides section .__sel i { cursor:inherit; }`;
+    html.__selmode .reveal .slides section .__sel i { cursor:inherit; }
+    .__editing { outline:calc(2px*var(--u,1)) solid #1a73e8 !important; outline-offset:calc(3px*var(--u,1));
+      background:rgba(26,115,232,.04); cursor:text !important; caret-color:#1a73e8; }
+    .__editing * { cursor:text !important; }
+    .__edit-hint { position:absolute; z-index:1003; pointer-events:none; white-space:nowrap; background:#1a73e8; color:#fff;
+      font:600 calc(11px*var(--u,1))/calc(17px*var(--u,1)) system-ui, sans-serif; padding:0 calc(5px*var(--u,1));
+      border-radius:calc(3px*var(--u,1)); }`;
   document.head.appendChild(css);
 
   /* ---- Geometry ------------------------------------------------------------------ */
@@ -246,7 +252,7 @@
   }
   let hoverBox = null;
   function onMove(e) {
-    if (MODE !== "main" || drag) return hideHover();
+    if (MODE !== "main" || drag || editing) return hideHover();
     if (mode === "select") return selectHover(e);
     const t = targetOf(e.target);
     if (!t) return hideHover();
@@ -328,6 +334,7 @@
 
   function drawSel() {
     if (!sel || !sel.el.isConnected) return removeSel();
+    if (editing) return;
     if (!selBox) {
       selBox = document.createElement("div");
       selBox.className = "__sel";
@@ -408,9 +415,19 @@
   }
   function clearGuides() { document.querySelectorAll(".__guide").forEach((g) => g.remove()); }
 
+  let lastDown = { t: 0, x: 0, y: 0, el: null };
   function selectPointerDown(e) {
+    if (editing) {
+      if (editing.el.contains(e.target)) return;   // let the browser place the caret
+      finishEdit(true);
+    }
     e.preventDefault(); e.stopPropagation();
     hideHover();
+    // double click: edit the text under the pointer
+    const now = performance.now();
+    const dbl = now - lastDown.t < 450 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6 && lastDown.el === e.target;
+    lastDown = { t: dbl ? 0 : now, x: e.clientX, y: e.clientY, el: e.target };
+    if (dbl && !e.target.closest?.(".__sel i")) return editAt(e.target, e.clientX, e.clientY);
     const handle = e.target.closest?.(".__sel i[data-h]");
     if (!handle) {
       if (e.target.closest?.(".__pin")) return;   // pin markers are removed in pin mode only
@@ -523,11 +540,158 @@
     host()?.selectionChanged(selectionInfo());
   }
   function setMode(m) {
+    if (editing) finishEdit(true);
     mode = m;
     document.documentElement.classList.toggle("__pinmode", mode === "pin");
     document.documentElement.classList.toggle("__selmode", mode === "select");
     hideHover();
     if (mode !== "select" && sel) select(null, null);
+  }
+
+  /* ---- Text editing ------------------------------------------------------------------------------
+     Double-click (or Enter on a selection) edits the element in place. While editing, the element
+     shows its source HTML, so math appears as TeX (\( ... \)) and is saved exactly as typed.
+     Enter or a click elsewhere saves, Esc cancels, Shift+Enter adds a line break, ⌘B / ⌘I format. */
+  let editing = null;
+  const TEXT_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "dt", "dd", "td", "th", "caption",
+    "figcaption", "blockquote", "pre", "button", "span", "small", "label"]);
+  const hasOwnText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim());
+  const isTextual = (el) => TEXT_TAGS.has(el.tagName.toLowerCase()) || hasOwnText(el);
+
+  /* What a double-click on t would edit: the element with an id around it, or a table cell. */
+  function textTargetOf(t) {
+    if (t.closest?.("svg")) return { why: "Text inside a diagram cannot be edited here yet. Pin it and ask Claude." };
+    const tt = targetOf(t);
+    if (!tt) return null;
+    if (tt.foot || tt.locked) return { why: `${tt.foot ? "The footer is" : "This element is"} set by brand.css and locked.` };
+    const cell = t.closest?.("td, th");
+    if (cell && cell.parentElement?.dataset.eid && tt.sec.contains(cell))
+      return { el: cell, sec: tt.sec, eid: cell.parentElement.dataset.eid, path: [cell.cellIndex] };
+    const el = tt.el;
+    if (el === tt.sec) return null;
+    if (!isTextual(el)) return { why: "Double-click directly on the text you want to edit." };
+    return { el, sec: tt.sec, eid: el.dataset.eid, path: [] };
+  }
+  function editAt(target, x, y) {
+    const t = textTargetOf(target);
+    if (!t) return;
+    if (t.why) return host()?.toast(t.why);
+    startEdit(t, x, y);
+  }
+  function editSelection() {
+    if (!sel) return false;
+    const t = textTargetOf(sel.el);
+    if (!t) return false;
+    if (t.why) { host()?.toast(t.why); return true; }
+    startEdit(t);
+    return true;
+  }
+
+  async function startEdit(t, x, y) {
+    if (!editable) return host()?.toast("Claude is working. Editing resumes when it has finished.");
+    if (editing) await finishEdit(true);
+    const src = await host()?.textSource(t.eid, t.path);
+    if (src == null || !t.el.isConnected) return;
+    const el = t.el;
+    if (!sel || sel.el !== el) select(el.dataset.eid ? el : null, t.sec);
+    removeSel();
+    hideHover();
+    editing = { ...t, rendered: el.innerHTML };
+    el.innerHTML = src;
+    editing.baseline = el.innerHTML;
+    editing.orig = new WeakSet(el.querySelectorAll("*"));
+    el.contentEditable = "true";
+    el.spellcheck = true;
+    el.classList.add("__editing");
+    try { document.execCommand("styleWithCSS", false, false); } catch {}
+    el.addEventListener("keydown", onEditKey);
+    el.addEventListener("paste", onEditPaste);
+    el.addEventListener("blur", onEditBlur);
+    el.focus({ preventScroll: true });
+    placeCaret(el, x, y);
+    showEditHint(true);
+    host()?.editingChanged(true);
+  }
+  function placeCaret(el, x, y) {
+    const s = getSelection();
+    let r = null;
+    if (x != null) {
+      if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(x, y);
+      else if (document.caretPositionFromPoint) {
+        const p = document.caretPositionFromPoint(x, y);
+        if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); }
+      }
+    }
+    if (!r || !el.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(el); r.collapse(false); }
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+  function showEditHint(on) {
+    document.querySelectorAll(".__edit-hint").forEach((h) => h.remove());
+    if (!on || !editing) return;
+    const b = boxOf(editing.el, editing.sec);
+    const h = document.createElement("div");
+    h.className = "__edit-hint";
+    h.textContent = "Editing · Enter to save · Esc to cancel · Shift+Enter new line";
+    Object.assign(h.style, b.y < 30 ? { left: b.x + "px", top: `calc(${b.y + b.h}px + 6px*var(--u,1))` }
+      : { left: b.x + "px", top: `calc(${b.y}px - 22px*var(--u,1))` });
+    editing.sec.appendChild(h);
+  }
+  function onEditKey(e) {
+    e.stopPropagation();   // keep Reveal and the editor shortcuts out of typing
+    if (e.key === "Escape") { e.preventDefault(); finishEdit(false); }
+    else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finishEdit(true); }
+    else if (e.key === "Enter") { e.preventDefault(); document.execCommand("insertLineBreak"); }
+  }
+  function onEditPaste(e) {
+    e.preventDefault();   // plain text only: no fonts or colours from elsewhere
+    const text = e.clipboardData?.getData("text/plain") || "";
+    document.execCommand("insertText", false, text.replace(/\s*\n\s*/g, " "));
+  }
+  function onEditBlur() { if (editing) finishEdit(true); }
+
+  /* The browser's editing adds <b>/<i>, styled spans and stray <br>s; turn them into clean HTML. */
+  function cleanEdited(el, orig) {
+    const rename = (node, tag) => {
+      const n = document.createElement(tag);
+      while (node.firstChild) n.appendChild(node.firstChild);
+      node.replaceWith(n);
+    };
+    const unwrap = (node) => node.replaceWith(...node.childNodes);
+    for (const n of [...el.querySelectorAll("*")]) {
+      if (orig.has(n)) continue;
+      const tag = n.tagName.toLowerCase();
+      if (tag === "b") rename(n, "strong");
+      else if (tag === "i") rename(n, "em");
+      else if (tag === "font" || (tag === "span" && !n.className && !n.dataset.eid)) unwrap(n);
+      else n.removeAttribute("style");
+    }
+    while (el.lastChild && el.lastChild.nodeName === "BR" && !orig.has(el.lastChild)) el.lastChild.remove();
+    el.normalize();
+    return el.innerHTML.replace(/\u00a0/g, "&nbsp;");
+  }
+  async function finishEdit(save) {
+    if (!editing) return;
+    const ed = editing;
+    editing = null;
+    const el = ed.el;
+    el.removeEventListener("keydown", onEditKey);
+    el.removeEventListener("paste", onEditPaste);
+    el.removeEventListener("blur", onEditBlur);
+    el.removeAttribute("contenteditable");
+    el.removeAttribute("spellcheck");
+    el.classList.remove("__editing");
+    showEditHint(false);
+    getSelection().removeAllRanges();
+    const html = save ? cleanEdited(el, ed.orig) : null;
+    host()?.editingChanged(false);
+    if (!save || html === ed.baseline) {
+      el.innerHTML = ed.rendered;   // back to the rendered version (math as KaTeX)
+      if (sel) drawSel();
+      return;
+    }
+    const label = `Edited text of ${ed.path.length ? `${nameOf(el.parentElement, ed.sec)} cell ${ed.path[0] + 1}` : nameOf(el, ed.sec)}`;
+    host()?.commitText({ eid: ed.eid, path: ed.path, html, label, text: textOf(el).slice(0, 300) });
   }
 
   /* ---- Stylesheet hot swap (no reload, no flicker) -------------------------------------------- */
@@ -574,10 +738,12 @@
 
     const api = {
       info, goto, indices, highlight, reloadCss,
-      setMode, selectEid, nudge,
+      setMode, selectEid, nudge, editSelection,
+      finishEdit: () => finishEdit(true),
+      isEditing: () => !!editing,
       deselect() { select(null, null); },
       hasSelection: () => !!sel,
-      setEditable(on) { editable = !!on; if (sel) drawSel(); },
+      setEditable(on) { editable = !!on; if (!editable && editing) finishEdit(true); if (sel) drawSel(); },
       renderPins,
       async measure(index) {
         goto(index);
@@ -611,7 +777,7 @@
           host()?.key(k, { meta, shift: e.shiftKey });
         }
       }, true);
-      Reveal.on("slidechanged", () => { hideHover(); if (sel) select(null, null); host()?.slideChanged(indexOf(Reveal.getCurrentSlide())); });
+      Reveal.on("slidechanged", () => { if (editing) finishEdit(true); hideHover(); if (sel) select(null, null); host()?.slideChanged(indexOf(Reveal.getCurrentSlide())); });
       Reveal.on("resize", () => { if (sel) drawSel(); });
       setMode("select");
       const startAt = +params.get("start");
