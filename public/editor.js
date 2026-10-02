@@ -231,7 +231,6 @@ $("hide-btn").onclick = () => toggleHidden();
 function renderToolbar() {
   const s = state.slides[state.current];
   $("slide-pos").textContent = s ? `${state.current + 1} / ${state.slides.length}` : "– / –";
-  $("slide-title").textContent = s ? s.title + (s.sub ? " · " + s.sub : "") : "";
   $("hide-btn").classList.toggle("is-hidden", !!s?.hidden);
   $("hide-btn").disabled = !s || state.busy;
   $("pin-toggle").setAttribute("aria-pressed", String(state.mode === "pin"));
@@ -543,6 +542,13 @@ document.addEventListener("keydown", (e) => {
 /* ---- Server events ---------------------------------------------------------------------------------- */
 function applyStatus(s) {
   state.status = s;
+  // the deck's name in the header ("ocean-example"), its full path on hover
+  if (s.deck) {
+    const folder = s.deck.split(/[\\/]/).filter(Boolean).pop() || s.deck;
+    $("deck-name").textContent = folder;
+    $("deck-name").title = `${s.deck}/${s.deckFile || "index.html"}`;
+    document.title = `${folder} · PinDeck`;
+  }
   setBusy(!!s.busy);
   $("model").textContent = modelLabel(s);
   $("model-btn").disabled = !!s.busy;

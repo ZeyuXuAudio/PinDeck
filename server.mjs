@@ -287,7 +287,7 @@ if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort
 if (MODEL) settings.model = MODEL;   // --model on the command line: this run only, not saved
 
 const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId, settings: { ...settings },
-  running: session.running, deck: DECK_DIR, chrome: !!CHROME,
+  running: session.running, deck: DECK_DIR, deckFile: DECK_FILE, chrome: !!CHROME,
   undo: changeLabel(liveTurns().at(-1)), redo: changeLabel(state.redo.at(-1)) });
 const pushStatus = () => broadcast("status", status());
 
