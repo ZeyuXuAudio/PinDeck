@@ -188,9 +188,6 @@ function goto(i) {
 function renderSlides() {
   const counts = {};
   state.pins.forEach((p) => (counts[p.slide.index] = (counts[p.slide.index] || 0) + 1));
-  const hiddenCount = state.slides.filter((s) => s.hidden).length;
-  $("slide-count").textContent = state.slides.length ? `${state.slides.length} slides` : "";
-  $("slide-count").title = hiddenCount ? `${hiddenCount} hidden: skipped when presenting` : "";
   $("slide-list").innerHTML = state.slides.map((s, i) => `
     <li data-i="${i}" class="${i === state.current ? "active" : ""} ${s.hidden ? "hidden-slide" : ""}" title="${esc(s.eid)}">
       <span class="num">${i + 1}</span>
@@ -224,15 +221,11 @@ async function toggleHidden(index = state.current) {
   const res = await api("slide-hidden", { eid: s.eid, hidden: !s.hidden });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) return toast(d.error || "Could not change the slide.");
-  toast(s.hidden ? `Slide ${index + 1} is shown again.` : `Slide ${index + 1} is hidden: skipped when presenting and in PDFs.`);
   loadMain();
 }
-$("hide-btn").onclick = () => toggleHidden();
 function renderToolbar() {
   const s = state.slides[state.current];
   $("slide-pos").textContent = s ? `${state.current + 1} / ${state.slides.length}` : "– / –";
-  $("hide-btn").classList.toggle("is-hidden", !!s?.hidden);
-  $("hide-btn").disabled = !s || state.busy;
   $("pin-toggle").setAttribute("aria-pressed", String(state.mode === "pin"));
   $("select-toggle").setAttribute("aria-pressed", String(state.mode === "select"));
   $("pin-hint").hidden = state.mode !== "pin";

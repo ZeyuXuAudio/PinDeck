@@ -472,7 +472,7 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
 });
 
 /* ---- Hand edits ----------------------------------------------------------------------------------------- */
-function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [] } = {}) {
+function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [], chat = true } = {}) {
   writeDeck(DECK_FILE, html, manual);
   const after = snapshot(EDITABLE);
   const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
@@ -480,7 +480,9 @@ function recordHandEdit(before, html, label, note, { manual = true, deletedFiles
     files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
   state.turns.push(t);
   state.redo = [];
-  addEntry({ kind: "edit", turnId: t.id, label, files: t.files });
+  // chat: false keeps the edit out of the chat (it stays in the undo history and Claude is still told)
+  if (chat) addEntry({ kind: "edit", turnId: t.id, label, files: t.files });
+  else state.seq++;   // keep turn ids unique: they share the counter with chat entries
   state.notes.push(note);
   pushStatus();
   return t.id;
@@ -671,7 +673,7 @@ const server = http.createServer(async (req, res) => {
       const turnId = recordHandEdit(before, r.html, `${b.hidden ? "Hid" : "Showed"} slide ${index + 1}`,
         `The user ${b.hidden ? "hid" : "showed again"} slide ${index + 1} (${b.eid}). Hidden slides carry ` +
         `data-visibility="hidden": they stay in the file but are skipped when presenting and in PDF exports.`,
-        { manual: true });   // the editor reloads the slide itself
+        { manual: true, chat: false });   // the editor reloads the slide itself; undo is in the toolbar
       return json(res, 200, { turnId, index });
     }
     if (p === "/api/add-slide" && req.method === "POST") {

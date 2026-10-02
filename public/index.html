@@ -12,7 +12,7 @@
 
   <!-- Left: slides -->
   <nav class="slides-pane" aria-label="Slides">
-    <div class="pane-head"><span class="brand"><span class="brand-pin" aria-hidden="true"></span>PinDeck</span> <span id="slide-count" class="muted"></span></div>
+    <div class="pane-head"><span class="brand"><span class="brand-pin" aria-hidden="true"></span>PinDeck</span></div>
     <div class="slides-actions menu-wrap">
       <button id="add-slide-btn" class="add-slide" aria-haspopup="menu" aria-expanded="false" title="Add a slide after the current one">＋ New slide</button>
       <div id="add-slide-menu" class="menu left" role="menu" hidden>
@@ -32,8 +32,6 @@
         <span id="slide-pos" class="pos">– / –</span>
         <button id="next" class="icon" title="Next slide (→)" aria-label="Next slide">›</button>
         <span id="deck-name" class="deck-name"></span>
-        <button id="hide-btn" class="small hide-btn" title="Hide this slide: it stays in the deck but is skipped when presenting and in PDFs (H)">
-          <span class="when-shown"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 1.5 1.1 2.6l2.3 2.3C2.2 5.8 1.3 6.9.8 8c.9 2.4 3.6 5 7.2 5 1.3 0 2.5-.3 3.5-.9l2.3 2.3 1.1-1.1zM8 11.2A3.2 3.2 0 0 1 4.9 7.2l1.3 1.3a1.7 1.7 0 0 0 1.3 1.3l1.3 1.3c-.3.1-.5.1-.8.1zM8 3c-1 0-1.9.2-2.7.5l1.4 1.4A3.2 3.2 0 0 1 11 9.2l2.2 2.2c.9-.9 1.6-2 2-3.4C14.3 5.6 11.6 3 8 3z"/></svg> Hide</span><span class="when-hidden"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.4 3 1.7 5.6.8 8c.9 2.4 3.6 5 7.2 5s6.3-2.6 7.2-5C14.3 5.6 11.6 3 8 3zm0 8.2A3.2 3.2 0 1 1 8 4.8a3.2 3.2 0 0 1 0 6.4zM8 6.3a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/></svg> Show</span></button>
       </div>
       <div class="group">
         <button id="undo" class="icon" aria-label="Undo" title="Undo (⌘Z)" disabled>↶</button>
@@ -49,9 +47,9 @@
           <button id="export-btn" aria-haspopup="menu" aria-expanded="false" title="Export the deck as a PDF">Export ▾</button>
           <div id="export-menu" class="menu" role="menu" hidden>
             <button role="menuitem" data-export="handout"><strong>Handout PDF</strong>
-              <span>One page per slide, build steps shown complete</span></button>
+              <span>One page per slide</span></button>
             <button role="menuitem" data-export="presentation"><strong>Presentation PDF</strong>
-              <span>One page per click: a slide with two build steps gives three pages</span></button>
+              <span>One page per click</span></button>
             <label class="menu-check"><input type="checkbox" id="export-hidden"> Include hidden slides</label>
           </div>
         </span>

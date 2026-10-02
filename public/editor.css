@@ -32,7 +32,6 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: -.01em; }
 .brand-pin { width: 14px; height: 14px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--orange);
   box-shadow: inset 0 0 0 4px var(--orange), inset 0 0 0 7px #fff; }
-#slide-count { font-size: 12.5px; }
 
 .app { display: grid; grid-template-columns: 220px minmax(0, 1fr) 400px; height: 100vh; }
 .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 44px;
@@ -95,12 +94,6 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .menu-wrap { position: relative; }
 .menu-check { display: flex; align-items: center; gap: 7px; padding: 8px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line);
   font-size: 12.5px; color: var(--muted); cursor: pointer; }
-.hide-btn { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; color: var(--muted); }
-.hide-btn .ic { width: 14px; height: 14px; flex: none; }
-/* both labels laid out the same way, so the two eye icons sit at the same height */
-.hide-btn .when-shown, .hide-btn.is-hidden .when-hidden { display: inline-flex; align-items: center; gap: 4px; }
-.hide-btn .when-hidden, .hide-btn.is-hidden .when-shown { display: none; }
-.hide-btn.is-hidden { color: var(--orange); border-color: var(--orange); }
 .slide-list li { position: relative; }
 .slide-list li.hidden-slide .t, .slide-list li.hidden-slide .s, .slide-list li.hidden-slide .num { opacity: .45; }
 .slide-list .kind.hid { color: var(--orange); border-color: #f2c48a; }

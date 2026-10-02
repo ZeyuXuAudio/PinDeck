@@ -78,7 +78,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
-| Hide a slide | The eye on a slide in the list, **Hide** next to the slide title, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
+| Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
@@ -144,6 +144,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.11.3**: a calmer interface: no slide count, no Hide/Show button in the header (eye and `H`
+  remain), no messages or chat entries for hiding and showing, shorter export descriptions.
 * **1.11.2**: the header shows the deck's name instead of the slide title; the browser tab is named after the deck.
 * **1.11.1**: the Hide and Show icons sit at the same height.
 * **1.11**: hide and show slides (eye in the slide list, toolbar button, `H`); hidden slides are skipped
