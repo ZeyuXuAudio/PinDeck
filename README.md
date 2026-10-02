@@ -144,6 +144,7 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.11.1**: the Hide and Show icons sit at the same height.
 * **1.11**: hide and show slides (eye in the slide list, toolbar button, `H`); hidden slides are skipped
   when presenting and in PDFs unless the export includes them.
 * **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in `~/.pindeck/config.json`.
