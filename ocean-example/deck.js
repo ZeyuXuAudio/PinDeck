@@ -25,15 +25,19 @@
   });
 
   /* ---- 2. Footer ---------------------------------------------------------- */
+  // Hidden slides (data-visibility="hidden") are not counted: reveal.js skips them when presenting.
   const skip = ".title-slide, .section-slide, .closing-slide, .no-foot";
-  document.querySelectorAll(".reveal .slides > section").forEach((section, i) => {
+  let n = 0;
+  document.querySelectorAll(".reveal .slides > section").forEach((section) => {
+    const hidden = section.dataset.visibility === "hidden";
+    if (!hidden) n++;
     if (section.matches(skip)) return;
     const foot = document.createElement("footer");
     foot.className = "slide-foot";
     foot.innerHTML =
       `<div class="f-left">${meta.authors || ""}${meta.institute ? " · " + meta.institute : ""}</div>` +
       `<div class="f-mid">${meta.shortTitle || ""}</div>` +
-      `<div class="f-num">${String(i + 1).padStart(2, "0")}</div>` +
+      `<div class="f-num">${hidden ? "–" : String(n).padStart(2, "0")}</div>` +
       `<img class="f-logo" src="assets/logo-placeholder-dark.svg" alt="">`;
     section.appendChild(foot);
   });

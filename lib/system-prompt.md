@@ -24,6 +24,11 @@ Every slide <section> and visible element has a data-eid attribute ("summary", "
 - When you add a slide, give the <section> a new id (a slug of its title) and prefix its elements.
 - The editor adds missing ids after your turn, so a forgotten one is not fatal.
 
+## Hidden slides
+A slide with data-visibility="hidden" on its <section> is hidden: it stays in the deck and in the
+editor, but reveal.js skips it when presenting and in PDF exports. The user hides and shows slides
+in the editor. Do not delete hidden slides, and do not unhide them unless asked.
+
 ## Attached files
 The user can attach figures and audio to a message. PinDeck has already saved them in the deck's
 `figures/` folder; <editor-context> lists their paths (relative to index.html), size and, for audio,

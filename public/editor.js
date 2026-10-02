@@ -21,7 +21,8 @@ let pendingMain = null; // iframe being loaded (double buffering avoids a white 
 let measure = null;     // { iframe, bridge }
 let measureReady = null, measureResolve = null;
 
-function deckSrc(mode, extra = "") { return `/deck/index.html?editor=${mode}${extra}`; }
+// showHiddenSlides: PinDeck shows hidden slides so they can be edited (reveal.js drops them otherwise)
+function deckSrc(mode, extra = "") { return `/deck/index.html?editor=${mode}&showHiddenSlides=true${extra}`; }
 
 function loadMain() {
   const f = document.createElement("iframe");
@@ -187,24 +188,52 @@ function goto(i) {
 function renderSlides() {
   const counts = {};
   state.pins.forEach((p) => (counts[p.slide.index] = (counts[p.slide.index] || 0) + 1));
+  const hiddenCount = state.slides.filter((s) => s.hidden).length;
   $("slide-count").textContent = state.slides.length ? `${state.slides.length} slides` : "";
+  $("slide-count").title = hiddenCount ? `${hiddenCount} hidden: skipped when presenting` : "";
   $("slide-list").innerHTML = state.slides.map((s, i) => `
-    <li data-i="${i}" class="${i === state.current ? "active" : ""}" title="${esc(s.eid)}">
+    <li data-i="${i}" class="${i === state.current ? "active" : ""} ${s.hidden ? "hidden-slide" : ""}" title="${esc(s.eid)}">
       <span class="num">${i + 1}</span>
       <span><div class="t">${esc(s.title)}</div>${s.sub ? `<div class="s">${esc(s.sub)}</div>` : ""}
-        ${s.kind !== "content" ? `<span class="kind">${esc(s.kind.replace(/-slide$/, ""))}</span>` : ""}</span>
+        ${s.kind !== "content" ? `<span class="kind">${esc(s.kind.replace(/-slide$/, ""))}</span>` : ""}
+        ${s.hidden ? '<span class="kind hid">hidden</span>' : ""}</span>
       ${counts[i] ? `<span class="badge" title="${counts[i]} pin(s)">${counts[i]}</span>` : "<span></span>"}
+      <button class="eye" data-eye="${i}" title="${s.hidden ? "Show this slide again" : "Hide this slide (skipped when presenting)"}"
+        aria-label="${s.hidden ? "Show" : "Hide"} slide ${i + 1}">${s.hidden ? EYE_ICON : EYE_OFF_ICON}</button>
     </li>`).join("");
   $("slide-list").querySelector("li.active")?.scrollIntoView({ block: "nearest" });
 }
 $("slide-list").addEventListener("click", (e) => {
+  const eye = e.target.closest("[data-eye]");
+  if (eye) { e.stopPropagation(); return toggleHidden(+eye.dataset.eye); }
   const li = e.target.closest("li[data-i]");
   if (li) goto(+li.dataset.i);
 });
+
+/* ---- Hide and show slides -------------------------------------------------------------------------
+   A hidden slide gets data-visibility="hidden" (reveal.js): it stays in the deck and in PinDeck, but is
+   skipped when presenting and in PDF exports. */
+const EYE_ICON = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3C4.4 3 1.7 5.6.8 8c.9 2.4 3.6 5 7.2 5s6.3-2.6 7.2-5C14.3 5.6 11.6 3 8 3zm0 8.2A3.2 3.2 0 1 1 8 4.8a3.2 3.2 0 0 1 0 6.4zM8 6.3a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z"/></svg>`;
+const EYE_OFF_ICON = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 1.5 1.1 2.6l2.3 2.3C2.2 5.8 1.3 6.9.8 8c.9 2.4 3.6 5 7.2 5 1.3 0 2.5-.3 3.5-.9l2.3 2.3 1.1-1.1zM8 11.2A3.2 3.2 0 0 1 4.9 7.2l1.3 1.3a1.7 1.7 0 0 0 1.3 1.3l1.3 1.3c-.3.1-.5.1-.8.1zM8 3c-1 0-1.9.2-2.7.5l1.4 1.4A3.2 3.2 0 0 1 11 9.2l2.2 2.2c.9-.9 1.6-2 2-3.4C14.3 5.6 11.6 3 8 3z"/></svg>`;
+async function toggleHidden(index = state.current) {
+  const s = state.slides[index];
+  if (!s) return;
+  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  flushNudge();
+  await editChain;
+  const res = await api("slide-hidden", { eid: s.eid, hidden: !s.hidden });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || "Could not change the slide.");
+  toast(s.hidden ? `Slide ${index + 1} is shown again.` : `Slide ${index + 1} is hidden: skipped when presenting and in PDFs.`);
+  loadMain();
+}
+$("hide-btn").onclick = () => toggleHidden();
 function renderToolbar() {
   const s = state.slides[state.current];
   $("slide-pos").textContent = s ? `${state.current + 1} / ${state.slides.length}` : "– / –";
   $("slide-title").textContent = s ? s.title + (s.sub ? " · " + s.sub : "") : "";
+  $("hide-btn").classList.toggle("is-hidden", !!s?.hidden);
+  $("hide-btn").disabled = !s || state.busy;
   $("pin-toggle").setAttribute("aria-pressed", String(state.mode === "pin"));
   $("select-toggle").setAttribute("aria-pressed", String(state.mode === "select"));
   $("pin-hint").hidden = state.mode !== "pin";
@@ -254,7 +283,7 @@ $("export-menu").addEventListener("click", async (e) => {
   try {
     flushNudge();
     await editChain;   // export what is saved, including the latest hand edits
-    const res = await api("export", { kind });
+    const res = await api("export", { kind, includeHidden: $("export-hidden").checked });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(d.error || "Export failed.");
     toast(`Saved ${esc(d.rel)} (${Math.round(d.bytes / 1024)} kB)<a href="${d.url}" target="_blank" rel="noopener">Open</a>`,
@@ -489,6 +518,7 @@ function handleKey(k, mod = {}) {
   if (mod.meta) return;
   if (k === "p" || k === "P") setMode(state.mode === "pin" ? "select" : "pin");
   else if (k === "v" || k === "V") setMode("select");
+  else if (k === "h" || k === "H") toggleHidden();
   else if (k === "Escape") { if (state.mode === "pin") setMode("select"); else main?.bridge.deselect(); }
   else if (k === "Enter") { if (!(state.sel && state.mode === "select" && main?.bridge.editSelection())) $("input").focus(); }
   else if ((k === "Delete" || k === "Backspace") && state.sel && state.mode === "select") requestDelete(state.sel.eid);
@@ -504,7 +534,7 @@ document.addEventListener("keydown", (e) => {
   const meta = e.metaKey || e.ctrlKey;
   if (meta && (e.key === "z" || e.key === "Z")) { e.preventDefault(); return handleKey(e.key, { meta, shift: e.shiftKey }); }
   if (meta || e.altKey) return;
-  if (["p", "P", "v", "V", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Delete", "Backspace"].includes(e.key)) {
+  if (["p", "P", "v", "V", "h", "H", "Escape", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Delete", "Backspace"].includes(e.key)) {
     e.preventDefault();
     handleKey(e.key, { shift: e.shiftKey });
   }

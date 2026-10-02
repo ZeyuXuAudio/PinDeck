@@ -62,6 +62,9 @@
     .__editing { outline:calc(2px*var(--u,1)) solid #1a73e8 !important; outline-offset:calc(3px*var(--u,1));
       background:rgba(26,115,232,.04); cursor:text !important; caret-color:#1a73e8; }
     .__editing * { cursor:text !important; }
+    .__hidden-banner { position:absolute; z-index:997; top:calc(26px*var(--u,1)); right:calc(26px*var(--u,1)); pointer-events:none;
+      background:#ED8C01; color:#fff; font:600 calc(12px*var(--u,1))/calc(22px*var(--u,1)) system-ui, sans-serif;
+      padding:0 calc(10px*var(--u,1)); border-radius:calc(11px*var(--u,1)); box-shadow:0 calc(2px*var(--u,1)) calc(8px*var(--u,1)) rgba(0,0,0,.25); }
     .__edit-hint { position:absolute; z-index:1003; pointer-events:none; white-space:nowrap; background:#1a73e8; color:#fff;
       font:600 calc(11px*var(--u,1))/calc(17px*var(--u,1)) system-ui, sans-serif; padding:0 calc(5px*var(--u,1));
       border-radius:calc(3px*var(--u,1)); }`;
@@ -114,8 +117,9 @@
       if (sub && title.endsWith(sub)) title = title.slice(0, -sub.length).trim();
     }
     const kind = [...sec.classList].find((c) => /-slide$/.test(c)) || "content";
+    const hidden = sec.getAttribute("data-visibility") === "hidden";
     return { index: i, eid: sec.dataset.eid || `#${i + 1}`, title: title || sec.dataset.eid || `Slide ${i + 1}`, sub, kind,
-      hasFooter: !!sec.querySelector(".slide-foot") };
+      hasFooter: !!sec.querySelector(".slide-foot"), hidden };
   }
   function info() {
     return { slides: slides().map((s, i) => slideInfo(s, i)), current: indexOf(Reveal.getCurrentSlide()) };
@@ -882,7 +886,7 @@
           nudge(k === "ArrowLeft" ? -step : k === "ArrowRight" ? step : 0, k === "ArrowUp" ? -step : k === "ArrowDown" ? step : 0);
           return;
         }
-        if ("pPvV".includes(k) && !meta || k === "Escape" || (k === "Enter" && !e.shiftKey) ||
+        if ("pPvVhH".includes(k) && !meta || k === "Escape" || (k === "Enter" && !e.shiftKey) ||
             (meta && (k === "z" || k === "Z" || k === "k"))) {
           e.preventDefault(); e.stopImmediatePropagation();
           host()?.key(k, { meta, shift: e.shiftKey });
@@ -891,6 +895,14 @@
       Reveal.on("slidechanged", () => { if (editing) finishEdit(true); hideHover(); if (sel) select(null, null); host()?.slideChanged(indexOf(Reveal.getCurrentSlide())); });
       Reveal.on("resize", () => { if (sel) drawSel(); });
       setMode("select");
+      // a banner on hidden slides, so nobody edits one without noticing (only in the editor view)
+      for (const sec of slides()) {
+        if (sec.getAttribute("data-visibility") !== "hidden") continue;
+        const b = document.createElement("div");
+        b.className = "__hidden-banner";
+        b.textContent = "Hidden slide · skipped when presenting and in PDFs";
+        sec.appendChild(b);
+      }
       const startAt = +params.get("start");
       if (startAt) goto(startAt);
     }

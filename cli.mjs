@@ -6,6 +6,7 @@
    node cli.mjs slides           slide numbers and ids
    node cli.mjs pdf handout      PDF with one page per slide (build steps in their final state)
    node cli.mjs pdf presentation PDF with one page per build step
+                                 (add "all" to include hidden slides: pdf handout all)
 
    node cli.mjs git-setup [deck] keep PinDeck's data-eid ids out of git (no server needed)
 
@@ -58,7 +59,8 @@ if (!url || !token) {
 if (!url) { console.error("The PinDeck server is not running (start it with: pindeck <deck-folder>)."); process.exit(1); }
 
 try {
-  const res = await fetch(`${url}/api/${cmd}?` + new URLSearchParams({ slide }), { headers: { "x-editor-token": token } });
+  const extra = cmd === "pdf" && process.argv[4] === "all" ? { all: "1" } : {};
+  const res = await fetch(`${url}/api/${cmd}?` + new URLSearchParams({ slide, ...extra }), { headers: { "x-editor-token": token } });
   const out = await res.text();
   (res.ok ? console.log : console.error)(out);
   process.exit(res.ok ? 0 : 1);

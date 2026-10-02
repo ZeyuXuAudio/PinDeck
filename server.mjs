@@ -20,7 +20,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, setAttr } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -181,7 +181,7 @@ function chrome(args, done) {
   });
 }
 const deckUrl = (mode, params = {}) =>
-  `${ORIGIN}/deck/${DECK_FILE}?` + new URLSearchParams({ editor: mode, ...params });
+  `${ORIGIN}/deck/${DECK_FILE}?` + new URLSearchParams({ editor: mode, showHiddenSlides: "true", ...params });
 async function takeShot(slide) {
   const pins = state.pins.filter((p) => p.slide.eid === slide.eid).map((p) => ({ n: p.n, eid: p.eid, at: p.at, point: p.point }));
   const out = path.join(SHOT_DIR, `${slide.eid.replace(/[^\w-]/g, "_")}-${Date.now()}.png`);
@@ -222,7 +222,7 @@ const measure = (slide) => measureInEditor(slide).catch(() => measureHeadless(sl
    Files go to <deck>/export/. One export at a time. */
 let exportQueue = Promise.resolve(), snapSeq = 0;
 const snapshots = new Map();   // id -> static print layout, served at /deck/__pindeck-print-<id>.html
-function exportPdf(kind) {
+function exportPdf(kind, includeHidden = false) {
   if (!CHROME) return Promise.reject(new Error("PDF export needs Chrome or Chromium (set CHROME_BIN)."));
   const split = kind === "presentation";
   const name = `${path.basename(DECK_DIR)}-${split ? "presentation" : "handout"}.pdf`;
@@ -231,7 +231,7 @@ function exportPdf(kind) {
   const run = async () => {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     const html = await printLayout(CHROME,
-      `${ORIGIN}/deck/${DECK_FILE}?editor=pdf&print-pdf&pdfSeparateFragments=${split}`, profile("layout"));
+      `${ORIGIN}/deck/${DECK_FILE}?editor=pdf&print-pdf&pdfSeparateFragments=${split}&showHiddenSlides=${!!includeHidden}`, profile("layout"));
     const id = `${process.pid}-${++snapSeq}`;
     snapshots.set(id, html);
     try { await printPdf(CHROME, `${ORIGIN}/deck/__pindeck-print-${id}.html`, out, profile("print")); }
@@ -659,6 +659,21 @@ const server = http.createServer(async (req, res) => {
       pushStatus();
       return json(res, 200, { settings });
     }
+    if (p === "/api/slide-hidden" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const slides = findSlides(parse(before[DECK_FILE]));
+      const index = slides.findIndex((s) => s.attrs["data-eid"]?.value === b.eid);
+      if (index < 0) return json(res, 404, { error: "Slide not found in the file." });
+      const r = setAttr(before[DECK_FILE], b.eid, "data-visibility", b.hidden ? "hidden" : null);
+      if (!r.changed) return json(res, 200, { unchanged: true });
+      const turnId = recordHandEdit(before, r.html, `${b.hidden ? "Hid" : "Showed"} slide ${index + 1}`,
+        `The user ${b.hidden ? "hid" : "showed again"} slide ${index + 1} (${b.eid}). Hidden slides carry ` +
+        `data-visibility="hidden": they stay in the file but are skipped when presenting and in PDF exports.`,
+        { manual: true });   // the editor reloads the slide itself
+      return json(res, 200, { turnId, index });
+    }
     if (p === "/api/add-slide" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
@@ -804,7 +819,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/api/export" && req.method === "POST") {
       const b = await body(req);
-      try { return json(res, 200, await exportPdf(b.kind)); }
+      try { return json(res, 200, await exportPdf(b.kind, b.includeHidden)); }
       catch (e) { return json(res, 500, { error: String(e.message || e) }); }
     }
 
@@ -812,7 +827,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/pdf") {
       const kind = url.searchParams.get("slide") || url.searchParams.get("kind") || "handout";
       if (!["handout", "presentation"].includes(kind)) return text(res, 400, 'Use "handout" or "presentation".');
-      const r = await exportPdf(kind);
+      const r = await exportPdf(kind, url.searchParams.get("all") === "1");
       return text(res, 200, r.path);
     }
     if (p === "/api/slides") {

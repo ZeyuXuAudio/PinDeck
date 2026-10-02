@@ -29,6 +29,10 @@ optional `<meta>` tags in the deck's `<head>` tell it about the design:
 <meta name="pindeck:locked" content=".slide-foot, .logo"> <!-- brand elements that cannot be selected or moved -->
 ```
 
+Hidden slides use reveal.js's `data-visibility="hidden"`. If the deck numbers its slides itself (as
+the example's `deck.js` does for the footer), count only slides without that attribute, or the
+numbers will jump where a slide is hidden.
+
 Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
 `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
 
@@ -74,6 +78,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
+| Hide a slide | The eye on a slide in the list, **Hide** next to the slide title, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
@@ -129,39 +134,28 @@ the files changed. CSS changes are swapped in without a reload.
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `LICENSE` | MIT. |
 
-## Limits of version 1.8
+## Current Limitations
 
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
-* No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does
-  not merge it with the one above; ask Claude for those.
 * Parts of an inline SVG move with the whole SVG; inline text (bold, spans) moves with its block.
-* Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to
-  turn hand edits into proper CSS when a layout should really change.
-* The undo history lives in the server and starts fresh when PinDeck restarts.
-* Headless Chrome on macOS can be slow to start; screenshots take about 1.5 s.
+* No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does not merge it with the one above; ask Claude for those.
+* Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to turn hand edits into proper CSS when a layout should really change.
+* The undo history lives on the server and starts fresh when PinDeck restarts.
 
 ## Versions
 
-* **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in
-  `~/.pindeck/config.json`.
-* **1.9**: `node cli.mjs git-setup` keeps PinDeck's ids out of git with a clean filter; id-only
-  changes no longer show in `git status`.
-* **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu
-  in the chat header; a + menu in the chat for files and screenshots.
-* **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption,
-  and optionally the files nothing else uses; undo restores element and files. Claude reads attached
-  images directly instead of trying to convert them; refused commands are explained in the chat.
-* **1.6**: attach figures and audio to chat messages (file picker, drag and drop, paste); audio gets a
-  waveform SVG; files dropped on a slide carry their position.
+* **1.11**: hide and show slides (eye in the slide list, toolbar button, `H`); hidden slides are skipped
+  when presenting and in PDFs unless the export includes them.
+* **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in `~/.pindeck/config.json`.
+* **1.9**: `node cli.mjs git-setup` keeps PinDeck's ids out of git with a clean filter; id-only changes no longer show in `git status`.
+* **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu in the chat header; a + menu in the chat for files and screenshots.
+* **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption, and optionally the files nothing else uses; undo restores elements and files. Claude reads attached images directly instead of trying to convert them; refused commands are explained in the chat.
+* **1.6**: attach figures and audio to chat messages (file picker, drag and drop, paste); audio gets a waveform SVG; files dropped on a slide carry their position.
 * **1.5**: PDF export (handout and presentation with build steps on separate pages).
-* **1.4**: decks describe their footer and locked brand elements with `<meta name="pindeck:...">`
-  tags; the layout check ignores invisible elements. New public example deck: `ocean-example/`.
-* **1.3**: `Enter` in a bullet starts a new bullet (split at the cursor); empty new bullets
-  are removed again.
-* **1.2**: text editing on the slide (double-click or Enter), with math as TeX, table cells,
-  bold and italic, plain-text paste; text edits are part of the undo history and reported to Claude.
-* **1.1**: select, drag, resize and nudge with snapping guides; one undo/redo history for hand
-  edits and Claude's changes; the selected element is sent to Claude.
+* **1.4**: decks describe their footer and locked brand elements with `<meta name="pindeck:...">` tags; the layout check ignores invisible elements. New public example deck: `ocean-example/`.
+* **1.3**: `Enter` in a bullet starts a new bullet (split at the cursor); empty new bullets are removed again.
+* **1.2**: text editing on the slide (double-click or Enter), with math as TeX, table cells, bold and italic, plain-text paste; text edits are part of the undo history and reported to Claude.
+* **1.1**: select, drag, resize and nudge with snapping guides; one undo/redo history for hand edits and Claude's changes; the selected element is sent to Claude.
 * **1.0**: pins, chat with Claude Code, layout reports, element ids, diff and undo.
 
 ## License
