@@ -15,7 +15,7 @@ Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `clau
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
 screenshots. PinDeck has no npm dependencies.
 
-Options: `--port 5180`, `--model <name>` (otherwise the model chosen in the chat header, or Claude Code's default), `--help`. The deck
+Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in `~/.pindeck/config.json`), `--help`. The deck
 folder defaults to the current folder and must contain `index.html`. Runtime files (chat history,
 screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), not in the deck.
 
@@ -31,6 +31,21 @@ optional `<meta>` tags in the deck's `<head>` tell it about the design:
 
 Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
 `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
+
+## Configuration
+
+`~/.pindeck/config.json` (or `$PINDECK_HOME/config.json`) is created on first start:
+
+```json
+{
+  "model": "sonnet",
+  "effort": "medium"
+}
+```
+
+`model` is `opus` or `sonnet`; `effort` is `low`, `medium`, `high`, `xhigh` or `max`. A choice in the
+chat header's menu is written to this file, so it always shows what PinDeck uses. Edit it while
+PinDeck is stopped, or simply use the menu.
 
 ## Keeping the ids out of git
 
@@ -59,7 +74,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
-| Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change; the choice is remembered. |
+| Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
@@ -127,6 +142,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in
+  `~/.pindeck/config.json`.
 * **1.9**: `node cli.mjs git-setup` keeps PinDeck's ids out of git with a clean filter; id-only
   changes no longer show in `git status`.
 * **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu

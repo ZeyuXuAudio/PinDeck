@@ -267,14 +267,24 @@ function addEntry(entry) {
 }
 const liveTurns = () => state.turns.filter((t) => !t.undone);
 const changeLabel = (t) => (t ? (t.kind === "manual" ? t.label : "Claude's change") : null);
-/* Model and effort for the Claude Code session, chosen in the chat header; kept across restarts. */
-const MODELS = ["", "opus", "sonnet"];                         // "" = Claude Code's default
-const EFFORTS = ["", "low", "medium", "high", "xhigh", "max"];
-const SETTINGS_FILE = path.join(HOME_DIR, "settings.json");
-const settings = { model: "", effort: "" };
-try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"))); } catch {}
-if (MODEL) settings.model = MODEL;   // --model on the command line wins
-const saveSettings = () => fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), () => {});
+/* Model and effort for the Claude Code session. ~/.pindeck/config.json holds them: PinDeck creates it
+   with the defaults below, you can edit it, and a choice in the chat header's menu is saved there too,
+   so the file always shows what PinDeck uses. --model on the command line applies to one run only. */
+const MODELS = ["opus", "sonnet"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const DEFAULTS = { model: "sonnet", effort: "medium" };
+const CONFIG_FILE = path.join(HOME_DIR, "config.json");
+const settings = { ...DEFAULTS };
+let fileConfig = {};
+try { fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")); }
+catch (e) { if (e.code !== "ENOENT") console.warn(`${CONFIG_FILE} is not valid JSON; using the defaults.`); }
+if (MODELS.includes(fileConfig.model)) settings.model = fileConfig.model;
+else if (fileConfig.model !== undefined) console.warn(`config.json: unknown model "${fileConfig.model}" (use ${MODELS.join(" or ")}); using ${DEFAULTS.model}.`);
+if (EFFORTS.includes(fileConfig.effort)) settings.effort = fileConfig.effort;
+else if (fileConfig.effort !== undefined) console.warn(`config.json: unknown effort "${fileConfig.effort}" (use ${EFFORTS.join(", ")}); using ${DEFAULTS.effort}.`);
+const saveSettings = () => fs.writeFile(CONFIG_FILE, JSON.stringify({ ...fileConfig, model: settings.model, effort: settings.effort }, null, 2) + "\n", () => {});
+if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort) saveSettings();   // create or complete the file
+if (MODEL) settings.model = MODEL;   // --model on the command line: this run only, not saved
 
 const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId, settings: { ...settings },
   running: session.running, deck: DECK_DIR, chrome: !!CHROME,
@@ -645,7 +655,7 @@ const server = http.createServer(async (req, res) => {
       saveSettings();
       // restart the session with the new flags; --resume keeps the conversation
       if (session.running) { session.stop(); setTimeout(ensureSession, 300); }
-      addEntry({ kind: "notice", text: `Model: ${model || "default"}, effort: ${effort || "default"}. The conversation continues.` });
+      addEntry({ kind: "notice", text: `Model: ${model[0].toUpperCase() + model.slice(1)}, effort: ${effort}. The conversation continues.` });
       pushStatus();
       return json(res, 200, { settings });
     }

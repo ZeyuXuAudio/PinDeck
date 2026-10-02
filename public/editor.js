@@ -598,9 +598,8 @@ $("add-slide-menu").addEventListener("click", async (e) => {
 });
 
 /* ---- Model and effort --------------------------------------------------------------------------------- */
-const MODEL_CHOICES = [["", "Default", "Claude Code's default model"], ["opus", "Opus", "most capable, for layout and design work"],
-  ["sonnet", "Sonnet", "faster, lighter on usage limits"]];
-const EFFORT_CHOICES = [["", "Default", ""], ["low", "Low", "quick edits"], ["medium", "Medium", ""], ["high", "High", ""],
+const MODEL_CHOICES = [["opus", "Opus", "most capable, for layout and design work"], ["sonnet", "Sonnet", "faster, lighter on usage limits"]];
+const EFFORT_CHOICES = [["low", "Low", "quick edits"], ["medium", "Medium", ""], ["high", "High", ""],
   ["xhigh", "Extra high", ""], ["max", "Max", "slowest, most careful"]];
 function prettyModel(id) {
   const m = /claude-(\w+)-(\d+)(?:-(\d+))?/.exec(id || "");
@@ -608,7 +607,9 @@ function prettyModel(id) {
 }
 function modelLabel(s) {
   const st = s.settings || {};
-  const model = prettyModel(s.model) || MODEL_CHOICES.find((c) => c[0] === st.model)?.[1] || "";
+  // the full name (e.g. "Sonnet 5.5") once Claude Code has reported it for the chosen model, else the choice
+  const full = prettyModel(s.model);
+  const model = full && (!st.model || full.toLowerCase().startsWith(st.model)) ? full : MODEL_CHOICES.find((c) => c[0] === st.model)?.[1] || full;
   return [model, st.effort ? EFFORT_CHOICES.find((c) => c[0] === st.effort)?.[1].toLowerCase() + " effort" : ""].filter(Boolean).join(" · ");
 }
 function renderModelMenu() {
@@ -617,8 +618,7 @@ function renderModelMenu() {
       data-set="${key}" data-value="${value}"><span class="tick">${st[key] === value ? "✓" : ""}</span>
       <strong>${label}</strong>${desc ? `<span class="d muted">${desc}</span>` : ""}</button>`;
   $("model-menu").innerHTML = `<div class="group">Model</div>${MODEL_CHOICES.map((c) => opt("model", c)).join("")}
-    <div class="sep"></div><div class="group">Effort: how long Claude thinks</div>${EFFORT_CHOICES.map((c) => opt("effort", c)).join("")}
-    <div class="sep"></div><div class="group" style="text-transform:none;letter-spacing:0;font-weight:400">The conversation continues after a change.</div>`;
+    <div class="sep"></div><div class="group">Effort: how long Claude thinks</div>${EFFORT_CHOICES.map((c) => opt("effort", c)).join("")}`;
 }
 wireMenu("model-btn", "model-menu", renderModelMenu);
 $("model-menu").addEventListener("click", async (e) => {
