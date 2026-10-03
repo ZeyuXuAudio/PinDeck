@@ -28,7 +28,7 @@ import { formatLayout, formatPin } from "./lib/layout.mjs";
 import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs";
 import { readPptx } from "./lib/pptx.mjs";
 import { exportPdf as pptxToPdf, renderJobs, renderAvailable } from "./lib/pptx-render.mjs";
-import { buildImport } from "./lib/pptx-import.mjs";
+import { buildImport, planSlides } from "./lib/pptx-import.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
 const USAGE = `Usage: pindeck [deck-folder] [--port 5180] [--model <name>]
@@ -389,10 +389,20 @@ function finishTurn({ error, cost, duration, denials = [] }) {
     const d = unifiedDiff(turn.before[f] ?? "", after[f] ?? "", f);
     return { file: f, added: d.added, removed: d.removed };
   }).filter((f) => f.added || f.removed);
-  const t = { id: turn.id, kind: "claude", before: turn.before, after, files, undone: false };
+  // after a hand-off: imported pictures that Claude replaced (nothing refers to them any more) are
+  // deleted; undo brings them back with the turn
+  const deletedFiles = [];
+  for (const rel of turn.importedFiles || []) {
+    const abs = path.join(DECK_DIR, rel);
+    if (!fs.existsSync(abs) || EDITABLE.some((f) => (after[f] || "").includes(rel))) continue;
+    deletedFiles.push({ rel, data: fs.readFileSync(abs) });
+    fs.rmSync(abs, { force: true });
+  }
+  const t = { id: turn.id, kind: "claude", before: turn.before, after, files, deletedFiles, undone: false };
   if (files.length) { state.turns.push(t); state.redo = []; }
   addEntry({ kind: "turn", turnId: files.length ? t.id : null, files, error, cost, duration,
     denials, restored, newIds: eid.assigned.length });
+  if (deletedFiles.length) addEntry({ kind: "notice", text: `Removed ${deletedFiles.map((f) => f.rel).join(", ")}: replaced, and no longer used.` });
   pushStatus();
 }
 
@@ -567,7 +577,7 @@ function startImport(name, buf) {
   return imp;
 }
 
-async function applyImport(imp, numbers, afterEid) {
+async function applyImport(imp, numbers, afterEid, refine = false) {
   const pdf = await imp.render;
   const before = snapshot(EDITABLE);
   const html0 = before[DECK_FILE];
@@ -603,7 +613,46 @@ async function applyImport(imp, numbers, afterEid) {
     (lost ? `${lost} build step(s) on parts of a picture could not be kept. ` : "") +
     `Hidden PowerPoint slides are hidden here too. The layout is a first approximation: check it before relying on it.`,
     { manual: true, addedFiles: r.files });
-  return { turnId, index: first, eid: eids[0], count: r.fragments.length, missing: r.plans.flatMap((p) => p.figures.filter((f) => f.missing)).length };
+  const refining = refine && !state.busy ? await refineImport(imp, pdf, r.plans, eids, first) : 0;
+  return { turnId, index: first, eid: eids[0], count: r.fragments.length, refining,
+    missing: r.plans.flatMap((p) => p.figures.filter((f) => f.missing)).length };
+}
+
+/* The hand-off: Claude gets the slides the import could only approximate, each with a picture of the
+   original slide, and improves them in the deck's style. Returns the number of slides handed over. */
+async function refineImport(imp, pdf, plans, eids, first) {
+  const todo = plans.map((p, i) => ({ p, index: first + i, eid: eids[i] })).filter((x) => x.p.complex.length);
+  if (!todo.length) return 0;
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  const original = (n) => path.join(SHOT_DIR, `import-${imp.id}-${n}.png`);
+  if (pdf) {
+    try { await renderJobs(pdf, todo.map((x) => ({ page: x.p.n, out: original(x.p.n), width: 1280 })), imp.dir); }
+    catch (e) { console.error(e); }
+  }
+  const nums = todo.map((x) => x.index + 1);
+  const list = nums.length === 1 ? `slide ${nums[0]}` : `slides ${nums.slice(0, -1).join(", ")} and ${nums.at(-1)}`;
+  const visible = `Improve the imported ${list}: compare ${todo.length === 1 ? "it" : "each"} with the original PowerPoint slide and rebuild what the import could only approximate.`;
+  const details = todo.map(({ p, index, eid }) => {
+    const pics = p.figures.filter((f) => f.crop && !f.missing && f.labels?.length)
+      .map((f) => `  ${f.file} (${f.table ? "table" : `${f.shapes} shapes`}); its texts: ${f.labels.map((l) => JSON.stringify(l)).join(", ")}`);
+    return `- Slide ${index + 1} (${eid}), PowerPoint slide ${p.n}: ${p.complex.join("; ")}.` +
+      (fs.existsSync(original(p.n)) ? `\n  Original slide: ${original(p.n)} (Read it).` : "") + (pics.length ? "\n" + pics.join("\n") : "");
+  }).join("\n");
+  const text = visible + "\n\n" +
+    `How to work, slide by slide: Read the original picture, look at the imported slide (\`${CLI_CMD} shot <n>\`), then improve it ` +
+    `in this deck's own style (theme.css):\n` +
+    `- Diagrams of boxes, arrows and text that became a picture: rebuild them as inline SVG in the deck's diagram style, ` +
+    `using the texts listed. Keep a picture if it is a plot, a photo or too intricate to redraw well. Do not delete a picture ` +
+    `you replaced: PinDeck removes it after your turn once nothing refers to it.\n` +
+    `- Equations that are pictures: write them as TeX (\\( \\) or \\[ \\]) if you can read them.\n` +
+    `- Tables kept as pictures: make them HTML tables in the deck's table style, marking highlighted rows as the deck does.\n` +
+    `- Build steps lost on parts of a diagram: add them back as fragments when you rebuild it.\n` +
+    `- Layout: nothing may overflow or overlap; check with \`${CLI_CMD} layout <n>\`.\n` +
+    `Keep the wording of the text and the speaker notes.\n\n${details}`;
+  const entry = addEntry({ kind: "user", text: visible });
+  startTurn(buildPrompt({ text }), entry);
+  state.turn.importedFiles = todo.flatMap(({ p }) => p.figures.filter((f) => f.crop && !f.missing).map((f) => f.file));
+  return todo.length;
 }
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
@@ -783,8 +832,10 @@ const server = http.createServer(async (req, res) => {
       let imp;
       try { imp = startImport(name, Buffer.concat(chunks)); }
       catch (e) { return json(res, 400, { error: `${name} could not be read: ${e.message}` }); }
+      // what the import can only approximate, so the dialog can offer Claude's help with it
+      const complex = new Map(planSlides(imp.model, imp.model.slides.map((s) => s.n)).map((p) => [p.n, p.complex]));
       return json(res, 200, { id: imp.id, name, render: renderAvailable(),
-        slides: imp.model.slides.map((s) => ({ n: s.n, title: s.title, subtitle: s.subtitle, hidden: s.hidden, kind: s.kind })) });
+        slides: imp.model.slides.map((s) => ({ n: s.n, title: s.title, subtitle: s.subtitle, hidden: s.hidden, kind: s.kind, complex: complex.get(s.n) || [] })) });
     }
     if (p === "/api/import-thumb") {
       const imp = lastImport, n = +url.searchParams.get("n");
@@ -798,7 +849,7 @@ const server = http.createServer(async (req, res) => {
       if (!imp || imp.id !== b.id) return json(res, 410, { error: "This import has expired. Choose the file again." });
       const numbers = (b.slides || []).filter((n) => imp.model.slides.some((s) => s.n === n));
       if (!numbers.length) return json(res, 400, { error: "Choose at least one slide." });
-      try { return json(res, 200, await applyImport(imp, numbers, b.after)); }
+      try { return json(res, 200, await applyImport(imp, numbers, b.after, !!b.refine)); }
       catch (e) { console.error(e); return json(res, 500, { error: String(e.message || e) }); }
     }
     if (p === "/api/stop" && req.method === "POST") {

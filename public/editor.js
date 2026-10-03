@@ -646,7 +646,7 @@ $("import-file").addEventListener("change", async () => {
   importStatus(d.render ? "Making slide pictures with PowerPoint…" : "PowerPoint or Keynote is needed for thumbnails and for diagrams; text is imported without them.");
   $("import-list").innerHTML = d.slides.map((s) => `<li><label>
       <div class="thumb"><input type="checkbox" value="${s.n}" ${s.hidden ? "" : "checked"}><span>${s.n}</span></div>
-      <div class="cap"><span class="n">${s.n}</span><span class="t">${esc(s.title || s.subtitle || "Untitled")}${s.title && s.subtitle ? ` · ${esc(s.subtitle)}` : ""}</span>${s.hidden ? '<span class="tag">hidden</span>' : ""}</div>
+      <div class="cap"><span class="n">${s.n}</span><span class="t">${esc(s.title || s.subtitle || "Untitled")}${s.title && s.subtitle ? ` · ${esc(s.subtitle)}` : ""}</span>${s.hidden ? '<span class="tag">hidden</span>' : ""}${s.complex.length ? `<span class="tag complex" title="${esc("Only approximated: " + s.complex.join("; "))}">complex</span>` : ""}</div>
     </label></li>`).join("");
   updateImportButton();
   $("import-dialog").showModal();
@@ -658,6 +658,11 @@ function importStatus(msg, error = false) {
 const importChecks = () => [...$("import-list").querySelectorAll("input[type=checkbox]")];
 function updateImportButton() {
   const n = importChecks().filter((c) => c.checked).length;
+  // Claude's help with what the import only approximates (diagrams as pictures, lost build steps, ...)
+  const complex = importChecks().filter((c) => c.checked && importing.slides.find((s) => s.n === +c.value)?.complex.length).length;
+  $("import-refine-wrap").hidden = !complex;
+  $("import-refine-label").textContent = complex === 1 ? "Then ask Claude to improve the complex slide"
+    : `Then ask Claude to improve the ${complex} complex slides`;
   $("import-go").textContent = n === 1 ? "Import 1 slide" : `Import ${n} slides`;
   $("import-go").disabled = !n;
   $("import-all").textContent = n === importChecks().length ? "Select none" : "Select all";
@@ -686,10 +691,12 @@ $("import-dialog").addEventListener("close", async () => {
   flushNudge();
   await editChain;
   toast(`Importing ${slides.length} slide${slides.length > 1 ? "s" : ""}…`, { ms: 60000 });
-  const res = await api("import-apply", { id: importing.id, slides, after: state.slides[state.current]?.eid });
+  const refine = !$("import-refine-wrap").hidden && $("import-refine").checked;
+  const res = await api("import-apply", { id: importing.id, slides, after: state.slides[state.current]?.eid, refine });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) return toast(d.error || "The import failed.");
-  toast(`Imported ${d.count} slide${d.count > 1 ? "s" : ""}.` + (d.missing ? ` ${d.missing} diagram${d.missing > 1 ? "s" : ""} could not be pictured (no PowerPoint or Keynote).` : ""));
+  toast(`Imported ${d.count} slide${d.count > 1 ? "s" : ""}.` + (d.missing ? ` ${d.missing} diagram${d.missing > 1 ? "s" : ""} could not be pictured (no PowerPoint or Keynote).` : "") +
+    (d.refining ? ` Claude is improving ${d.refining === 1 ? "the complex slide" : `${d.refining} complex slides`}.` : ""), { ms: 5000 });
   state.current = d.index;
   try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
   loadMain();

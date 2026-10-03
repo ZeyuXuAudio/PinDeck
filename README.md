@@ -78,7 +78,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
-| Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
+| Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts, and Claude can improve the complex ones; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
@@ -114,11 +114,20 @@ The import keeps what can be carried over exactly and makes pictures of the rest
   may control the app. The same PDF gives the thumbnails in the import dialog.
 * **Layout:** blocks that sit side by side become `.cols` with the slide's proportions, others are
   stacked top to bottom; figures and, if needed, the text are scaled so that the slide fits.
+* **Equations** (PowerPoint's equation editor) become TeX for the deck's KaTeX: `\( \)` in the text,
+  `\[ \]` on their own line; fractions, scripts, roots, sums and integrals, functions and limits,
+  accents, braces, matrices and the bold, italic and double-struck math letters are converted.
 * **Hidden slides** stay hidden (`data-visibility="hidden"`).
 
-The result is a first draft in the deck's style: check each slide, and ask Claude to rebuild a
-diagram as SVG or tidy a layout. Without PowerPoint or Keynote (or on other
-systems than macOS) only the text and the pictures are imported.
+**Hand-off to Claude.** Slides the import can only approximate are tagged *complex* in the dialog:
+diagrams of many shapes or tables with shapes over them that became pictures, pictures placed inside
+text (often equations as images), build steps on parts of a diagram, slides without a title, and
+text that had to shrink to fit. With **Then ask Claude to improve the complex slides** ticked, Claude
+gets these slides right after the import, each with a picture of the original slide and the texts of
+its diagrams, and rebuilds diagrams as SVG, equations as TeX and tables as HTML in the deck's style.
+The request shows in the chat like your own messages, and its changes can be undone as usual.
+
+Without PowerPoint or Keynote (or on other systems than macOS) only the text and the pictures are imported.
 
 ## How it works
 
@@ -164,6 +173,7 @@ systems than macOS) only the text and the pictures are imported.
 | `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
 | `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, tables, build steps, audio, layout, HTML in the deck's style. |
 | `lib/waveform.mjs` | Waveform SVGs for imported audio. |
+| `lib/omml.mjs` | PowerPoint equations (Office Math) to TeX. |
 | `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide pictures: PowerPoint or Keynote saves a PDF, macOS PDFKit renders pages and regions of it. |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
@@ -181,6 +191,9 @@ systems than macOS) only the text and the pictures are imported.
 
 ## Versions
 
+* **2.2**: PowerPoint import with equations as TeX for KaTeX, and the hand-off to Claude: complex slides are
+  tagged in the import dialog and, if wanted, improved by Claude right after the import, with a picture of
+  each original slide.
 * **2.1**: PowerPoint import with build steps (fragments in click order), HTML tables in the deck's table
   style, audio in the deck's player with a waveform, video with its poster, coloured words as `.hl`.
 * **2.0**: import slides from PowerPoint (`.pptx`): text as HTML in the deck's layouts, pictures copied,

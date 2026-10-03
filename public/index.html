@@ -135,7 +135,11 @@
     <p id="import-status" class="import-status muted"></p>
     <ol id="import-list" class="import-list"></ol>
     <div class="dialog-buttons">
-      <span class="muted small-note">Added after the current slide. You can undo this with ⌘Z.</span>
+      <span class="import-notes">
+        <label class="check" id="import-refine-wrap" hidden><input type="checkbox" id="import-refine" checked>
+          <span id="import-refine-label">Then ask Claude to improve the complex slides</span></label>
+        <span class="muted small-note">Added after the current slide. You can undo this with ⌘Z.</span>
+      </span>
       <button value="cancel">Cancel</button>
       <button value="import" class="primary" id="import-go">Import</button>
     </div>
