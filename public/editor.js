@@ -569,6 +569,7 @@ function connect() {
     scrollChat();
   });
   es.addEventListener("chat-update", (ev) => renderEntry(JSON.parse(ev.data)));
+  es.addEventListener("import", (ev) => showImportThumbs(JSON.parse(ev.data)));
   es.addEventListener("status", (ev) => applyStatus(JSON.parse(ev.data)));
   es.addEventListener("reset", () => { clearChat(); state.turns.clear(); });
   es.addEventListener("undone", (ev) => {
@@ -613,6 +614,7 @@ $("add-slide-menu").addEventListener("click", async (e) => {
   const item = e.target.closest("[data-slide]");
   if (!item) return;
   closeMenus();
+  if (item.dataset.slide === "import") return $("import-file").click();
   if (state.busy) return toast("Claude is working. Wait until it has finished.");
   flushNudge();
   await editChain;
@@ -622,6 +624,73 @@ $("add-slide-menu").addEventListener("click", async (e) => {
   if (!res.ok) return toast(d.error || "Could not add the slide.");
   state.current = d.index;   // the reload opens the new slide ...
   state.pendingTitleEdit = item.dataset.slide !== "duplicate";   // ... with its title ready for typing
+  try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
+  loadMain();
+});
+
+/* ---- Import from PowerPoint -------------------------------------------------------------------------
+   The file goes to the server, which lists its slides at once and makes thumbnails in the background
+   (with PowerPoint or Keynote). The chosen slides are added after the current one. */
+let importing = null;   // { id, name, slides }
+$("import-file").addEventListener("change", async () => {
+  const file = $("import-file").files[0];
+  $("import-file").value = "";
+  if (!file) return;
+  toast(`Reading ${file.name}…`);
+  const res = await fetch("/api/import", { method: "POST", body: file,
+    headers: { "x-editor-token": TOKEN, "x-filename": encodeURIComponent(file.name), "content-type": "application/octet-stream" } });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || `Could not read ${file.name}.`);
+  importing = d;
+  $("import-title").textContent = `Import from ${d.name}`;
+  importStatus(d.render ? "Making slide pictures with PowerPoint…" : "PowerPoint or Keynote is needed for thumbnails and for diagrams; text is imported without them.");
+  $("import-list").innerHTML = d.slides.map((s) => `<li><label>
+      <div class="thumb"><input type="checkbox" value="${s.n}" ${s.hidden ? "" : "checked"}><span>${s.n}</span></div>
+      <div class="cap"><span class="n">${s.n}</span><span class="t">${esc(s.title || s.subtitle || "Untitled")}${s.title && s.subtitle ? ` · ${esc(s.subtitle)}` : ""}</span>${s.hidden ? '<span class="tag">hidden</span>' : ""}</div>
+    </label></li>`).join("");
+  updateImportButton();
+  $("import-dialog").showModal();
+});
+function importStatus(msg, error = false) {
+  $("import-status").textContent = msg;
+  $("import-status").classList.toggle("error", error);
+}
+const importChecks = () => [...$("import-list").querySelectorAll("input[type=checkbox]")];
+function updateImportButton() {
+  const n = importChecks().filter((c) => c.checked).length;
+  $("import-go").textContent = n === 1 ? "Import 1 slide" : `Import ${n} slides`;
+  $("import-go").disabled = !n;
+  $("import-all").textContent = n === importChecks().length ? "Select none" : "Select all";
+}
+$("import-list").addEventListener("change", updateImportButton);
+$("import-all").addEventListener("click", () => {
+  const all = importChecks().some((c) => !c.checked);
+  importChecks().forEach((c) => { c.checked = all; });
+  updateImportButton();
+});
+function showImportThumbs(ev) {
+  if (!importing || ev.id !== importing.id) return;
+  if (ev.error) return importStatus(`No slide pictures (${ev.error}). Text is imported; diagrams are left out.`, true);
+  importStatus(`Slide pictures by ${ev.app || "PowerPoint"}. Hidden slides are not selected.`);
+  for (const c of importChecks()) {
+    const img = new Image();
+    img.alt = "";
+    img.src = `/api/import-thumb?id=${importing.id}&n=${c.value}&t=${TOKEN}`;
+    c.closest(".thumb").append(img);
+  }
+}
+$("import-dialog").addEventListener("close", async () => {
+  if ($("import-dialog").returnValue !== "import" || !importing) return;
+  const slides = importChecks().filter((c) => c.checked).map((c) => +c.value);
+  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  flushNudge();
+  await editChain;
+  toast(`Importing ${slides.length} slide${slides.length > 1 ? "s" : ""}…`, { ms: 60000 });
+  const res = await api("import-apply", { id: importing.id, slides, after: state.slides[state.current]?.eid });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || "The import failed.");
+  toast(`Imported ${d.count} slide${d.count > 1 ? "s" : ""}.` + (d.missing ? ` ${d.missing} diagram${d.missing > 1 ? "s" : ""} could not be pictured (no PowerPoint or Keynote).` : ""));
+  state.current = d.index;
   try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
   loadMain();
 });

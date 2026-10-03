@@ -10,6 +10,7 @@
    - answers `cli.mjs layout|shot|slides|pdf` for Claude's self-checks and exports
    - exports the deck as a PDF handout or a PDF presentation (build steps on separate pages)
    - stores figures and audio attached to chat messages in <deck>/figures/ for Claude to use
+   - imports slides from PowerPoint files in the deck's own layouts
    Listens on 127.0.0.1 only; every API call needs the per-run token.
    Runtime files (chat, screenshots, backups) live in ~/.pindeck, never in the deck or the package. */
 
@@ -20,11 +21,14 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, setAttr } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, setAttr, elementEnd } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
 import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs";
+import { readPptx } from "./lib/pptx.mjs";
+import { exportPdf as pptxToPdf, renderJobs, renderAvailable } from "./lib/pptx-render.mjs";
+import { buildImport } from "./lib/pptx-import.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
 const USAGE = `Usage: pindeck [deck-folder] [--port 5180] [--model <name>]
@@ -472,11 +476,11 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
 });
 
 /* ---- Hand edits ----------------------------------------------------------------------------------------- */
-function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [], chat = true } = {}) {
+function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [], addedFiles = [], chat = true } = {}) {
   writeDeck(DECK_FILE, html, manual);
   const after = snapshot(EDITABLE);
   const d = unifiedDiff(before[DECK_FILE], after[DECK_FILE], DECK_FILE);
-  const t = { id: state.seq + 1, kind: "manual", label, before, after, deletedFiles,
+  const t = { id: state.seq + 1, kind: "manual", label, before, after, deletedFiles, addedFiles,
     files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
   state.turns.push(t);
   state.redo = [];
@@ -517,6 +521,7 @@ function undo(res) {
     fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
     fs.writeFileSync(path.join(DECK_DIR, rel), data);
   }
+  for (const { rel } of t.addedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });   // imported figures go
   t.undone = true;
   state.redo.push(t);
   state.notes.push(t.kind === "manual"
@@ -526,6 +531,76 @@ function undo(res) {
   if (edited) addEntry({ kind: "notice", text: "Undone. Edits made after that change were reverted too." });
   pushStatus();
   return json(res, 200, {});
+}
+
+/* ---- PowerPoint import -----------------------------------------------------------------------------
+   Upload: the file is read at once (slide list for the dialog); in the background PowerPoint or Keynote
+   makes a PDF of it, from which come the thumbnails and, on import, the pictures of diagrams.
+   Only the latest upload is kept, in ~/.pindeck/decks/<deck>/imports/. */
+const IMPORT_DIR = path.join(STATE_DIR, "imports");
+const IMPORT_MAX = 500 * 1024 * 1024;
+let lastImport = null;   // { id, name, dir, model, render: Promise<pdf path | null>, renderError }
+fs.rmSync(IMPORT_DIR, { recursive: true, force: true });
+
+function startImport(name, buf) {
+  if (lastImport) fs.rm(lastImport.dir, { recursive: true, force: true }, () => {});
+  const id = crypto.randomBytes(6).toString("hex");
+  const dir = path.join(IMPORT_DIR, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "deck.pptx");
+  fs.writeFileSync(file, buf);
+  const model = readPptx(buf);
+  const imp = { id, name, dir, model, renderError: null };
+  imp.render = !renderAvailable() ? Promise.resolve(null) : (async () => {
+    try {
+      const { pdf, app } = await pptxToPdf(file, dir);
+      await renderJobs(pdf, model.slides.map((s) => ({ page: s.n, out: path.join(dir, `thumb-${s.n}.png`), width: 320 })), dir);
+      if (lastImport === imp) broadcast("import", { id, thumbs: true, app });
+      return pdf;
+    } catch (e) {
+      imp.renderError = String(e.message || e);
+      if (lastImport === imp) broadcast("import", { id, error: imp.renderError });
+      return null;
+    }
+  })();
+  lastImport = imp;
+  return imp;
+}
+
+async function applyImport(imp, numbers, afterEid) {
+  const pdf = await imp.render;
+  const before = snapshot(EDITABLE);
+  const html0 = before[DECK_FILE];
+  const slides = findSlides(parse(html0));
+  if (!slides.length) throw new Error("The deck has no slides to add to.");
+  const afterIdx = Math.max(0, slides.findIndex((s) => s.attrs["data-eid"]?.value === afterEid));
+  const after = slides[afterIdx] ?? slides.at(-1);
+  const css = (readDeck("theme.css") || "") + (readDeck("brand.css") || "");
+  const prefix = path.basename(imp.name, path.extname(imp.name)).normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").split("-").slice(0, 3).join("-") || "import";
+  const r = await buildImport({ model: imp.model, numbers, pdf, workDir: imp.dir, deckDir: DECK_DIR, deckHtml: html0, css, after: afterIdx, prefix });
+  // the new slides go after the current one, at its indentation
+  const end = elementEnd(html0, after);
+  const ls = html0.lastIndexOf("\n", after.start - 1) + 1;
+  const indent = /^\s*$/.test(html0.slice(ls, after.start)) ? html0.slice(ls, after.start) : "";
+  const html = assignEids(html0.slice(0, end) + r.fragments.map((f) => `\n\n${indent}` + f).join("") + html0.slice(end)).html;
+  for (const f of r.files) {
+    const abs = path.join(DECK_DIR, f.rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    ourWrites.set(f.rel, { hash: hash(f.data.toString("utf8")), manual: true });   // no reload for each new file
+    fs.writeFileSync(abs, f.data);
+  }
+  const all = findSlides(parse(html));
+  const first = afterIdx + 1, last = afterIdx + r.fragments.length;
+  const eids = all.slice(first, last + 1).map((s) => s.attrs["data-eid"]?.value);
+  const range = first === last ? `slide ${first + 1}` : `slides ${first + 1}–${last + 1}`;
+  const cut = r.plans.flatMap((p) => p.figures.filter((f) => f.crop && !f.missing).map((f) => f.file));
+  const turnId = recordHandEdit(before, html, `Imported ${r.fragments.length} slide${r.fragments.length > 1 ? "s" : ""} from ${imp.name} (${range})`,
+    `The user imported ${r.fragments.length} slide(s) from the PowerPoint file "${imp.name}" as ${range} (${eids.join(", ")}). ` +
+    `Text became HTML in the deck's layouts; ` + (cut.length ? `diagrams, tables and charts are pictures cut from PowerPoint's rendering of the slide (${cut.join(", ")}). ` : "") +
+    `Hidden PowerPoint slides are hidden here too. The layout is a first approximation: check it before relying on it.`,
+    { manual: true, addedFiles: r.files });
+  return { turnId, index: first, eid: eids[0], count: r.fragments.length, missing: r.plans.flatMap((p) => p.figures.filter((f) => f.missing)).length };
 }
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
@@ -692,6 +767,37 @@ const server = http.createServer(async (req, res) => {
         { manual: true });   // the editor reloads itself and opens the new slide; no second reload from the watcher
       return json(res, 200, { turnId, index: r.index, eid });
     }
+    if (p === "/api/import" && req.method === "POST") {
+      const name = path.basename(decodeURIComponent(String(req.headers["x-filename"] || "slides.pptx")));
+      if (!/\.pptx$/i.test(name)) return json(res, 415, { error: "Choose a PowerPoint file (.pptx). Save older .ppt files as .pptx first." });
+      const chunks = [];
+      let size = 0;
+      for await (const c of req) {
+        size += c.length;
+        if (size > IMPORT_MAX) return json(res, 413, { error: `${name} is larger than ${kb(IMPORT_MAX)}.` });
+        chunks.push(c);
+      }
+      let imp;
+      try { imp = startImport(name, Buffer.concat(chunks)); }
+      catch (e) { return json(res, 400, { error: `${name} could not be read: ${e.message}` }); }
+      return json(res, 200, { id: imp.id, name, render: renderAvailable(),
+        slides: imp.model.slides.map((s) => ({ n: s.n, title: s.title, subtitle: s.subtitle, hidden: s.hidden, kind: s.kind })) });
+    }
+    if (p === "/api/import-thumb") {
+      const imp = lastImport, n = +url.searchParams.get("n");
+      if (!imp || imp.id !== url.searchParams.get("id") || !Number.isInteger(n)) return text(res, 404, "Not found");
+      return serveFile(res, path.join(imp.dir, `thumb-${n}.png`));
+    }
+    if (p === "/api/import-apply" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const imp = lastImport;
+      if (!imp || imp.id !== b.id) return json(res, 410, { error: "This import has expired. Choose the file again." });
+      const numbers = (b.slides || []).filter((n) => imp.model.slides.some((s) => s.n === n));
+      if (!numbers.length) return json(res, 400, { error: "Choose at least one slide." });
+      try { return json(res, 200, await applyImport(imp, numbers, b.after)); }
+      catch (e) { console.error(e); return json(res, 500, { error: String(e.message || e) }); }
+    }
     if (p === "/api/stop" && req.method === "POST") {
       if (state.busy && session.running) {
         session.interrupt();
@@ -732,6 +838,10 @@ const server = http.createServer(async (req, res) => {
       state.redo.pop();
       for (const f of EDITABLE) if (t.after[f] != null) writeDeck(f, t.after[f]);
       for (const { rel } of t.deletedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });
+      for (const { rel, data } of t.addedFiles || []) {
+        fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
+        fs.writeFileSync(path.join(DECK_DIR, rel), data);
+      }
       t.undone = false;
       state.notes.push(t.kind === "manual" ? `The user redid their hand edit: ${t.label}.`
         : `The user redid your change from turn ${t.id} after undoing it.`);

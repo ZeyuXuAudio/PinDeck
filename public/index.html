@@ -22,7 +22,9 @@
         <button role="menuitem" data-slide="content"><strong>Content slide</strong><span>Title and bullets, in the style of this deck</span></button>
         <button role="menuitem" data-slide="section"><strong>Section divider</strong><span>Opens a new part of the talk</span></button>
         <button role="menuitem" data-slide="duplicate"><strong>Duplicate this slide</strong><span>A copy to start from</span></button>
+        <button role="menuitem" data-slide="import"><strong>Import from PowerPoint…</strong><span>Slides from a .pptx file, in the style of this deck</span></button>
       </div>
+      <input type="file" id="import-file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
     </div>
     <ol id="slide-list" class="slide-list"></ol>
   </nav>
@@ -122,6 +124,20 @@
     <div class="dialog-buttons">
       <button value="cancel" autofocus>Cancel</button>
       <button value="delete" class="danger" id="delete-confirm">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="import-dialog" class="import-dialog">
+  <form method="dialog">
+    <div class="dialog-head"><span id="import-title">Import from PowerPoint</span>
+      <button type="button" class="small" id="import-all">Select none</button></div>
+    <p id="import-status" class="import-status muted"></p>
+    <ol id="import-list" class="import-list"></ol>
+    <div class="dialog-buttons">
+      <span class="muted small-note">Added after the current slide. You can undo this with ⌘Z.</span>
+      <button value="cancel">Cancel</button>
+      <button value="import" class="primary" id="import-go">Import</button>
     </div>
   </form>
 </dialog>

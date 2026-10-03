@@ -78,6 +78,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
+| Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
@@ -86,6 +87,29 @@ show and commit as usual. Clones without the filter configured simply see the fi
 
 You can also edit `index.html` or `theme.css` in any editor; the slide reloads, and Claude is told
 the files changed. CSS changes are swapped in without a reload.
+
+## PowerPoint import
+
+The import keeps what can be carried over exactly and makes pictures of the rest:
+
+* **Text becomes HTML** in the deck's layouts: the title (and the subtitle, as a `.sub` line or a
+  kicker, as the deck does it), bullets with their levels, bold, italics, superscripts, links and
+  line breaks, other text as paragraphs, references at the bottom of a slide as `.refs`, and the
+  speaker notes. Text that is clearly smaller or larger than the slide's body text keeps that ratio.
+  The first slide is filled into the deck's title slide (title, subtitle, authors, event, institute)
+  and PowerPoint section headers into its section divider.
+* **Pictures are copied** to `figures/` (`<file>-s04-1.png`, ...).
+* **Everything drawn** (diagrams built from shapes and arrows, tables, charts, pictures with labels on
+  them, EMF graphics) becomes a picture cut from the slide as PowerPoint renders it. For this PinDeck
+  asks PowerPoint (or else Keynote) to save the presentation as a PDF; macOS asks once whether PinDeck
+  may control the app. The same PDF gives the thumbnails in the import dialog.
+* **Layout:** blocks that sit side by side become `.cols` with the slide's proportions, others are
+  stacked top to bottom; figures and, if needed, the text are scaled so that the slide fits.
+* **Hidden slides** stay hidden (`data-visibility="hidden"`). Audio and video become plain players.
+
+The result is a first draft in the deck's style: check each slide, and ask Claude to rebuild a
+diagram as SVG, turn a table into HTML or tidy a layout. Without PowerPoint or Keynote (or on other
+systems than macOS) only the text and the pictures are imported.
 
 ## How it works
 
@@ -128,6 +152,9 @@ the files changed. CSS changes are swapped in without a reload.
 | `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
 | `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` / `pdf presentation` commands for Claude (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
+| `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
+| `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, layout, HTML in the deck's style. |
+| `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide pictures: PowerPoint or Keynote saves a PDF, macOS PDFKit renders pages and regions of it. |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
 | `lib/claude.mjs` | The long-running Claude Code process. |
@@ -144,6 +171,9 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **2.0**: import slides from PowerPoint (`.pptx`): text as HTML in the deck's layouts, pictures copied,
+  diagrams, tables and charts as pictures cut from PowerPoint's rendering; thumbnails in the import
+  dialog; undo removes the imported slides and their figures.
 * **1.12.1**: the PinDeck pin as the browser tab icon (SVG, with PNG versions for Safari).
 * **1.12**: double-clicking an equation opens its text with the equation's TeX selected, also for
   equations on their own line and for parts KaTeX draws as SVG (roots, wide accents, arrows).
