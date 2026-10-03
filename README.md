@@ -93,22 +93,31 @@ the files changed. CSS changes are swapped in without a reload.
 The import keeps what can be carried over exactly and makes pictures of the rest:
 
 * **Text becomes HTML** in the deck's layouts: the title (and the subtitle, as a `.sub` line or a
-  kicker, as the deck does it), bullets with their levels, bold, italics, superscripts, links and
-  line breaks, other text as paragraphs, references at the bottom of a slide as `.refs`, and the
-  speaker notes. Text that is clearly smaller or larger than the slide's body text keeps that ratio.
+  kicker, as the deck does it), bullets with their levels, bold, italics, coloured words (as `.hl`),
+  superscripts, links and line breaks, other text as paragraphs, references at the bottom of a slide
+  as `.refs`, and the speaker notes. Side notes and labels clearly smaller than the body text stay smaller.
+* **Tables become HTML tables** with the class of the deck's own tables, merged cells, header rows
+  and a caption from the text above them. A table with shapes drawn over it (e.g. boxes marking rows)
+  is kept as a picture instead.
+* **Build steps:** shapes and paragraphs that appear (or disappear) on a click become reveal.js
+  fragments in the same order, also when several things appear on one click. A picture made of several
+  shapes appears on a click only if all of its shapes do.
+* **Audio** goes into the deck's own audio player (a copy of its first `.demo-row`, with a waveform made
+  from the sound), labelled with the nearest text on the slide; without such a player, plain players.
+  **Video** keeps its place, with its poster frame.
   The first slide is filled into the deck's title slide (title, subtitle, authors, event, institute)
   and PowerPoint section headers into its section divider.
 * **Pictures are copied** to `figures/` (`<file>-s04-1.png`, ...).
-* **Everything drawn** (diagrams built from shapes and arrows, tables, charts, pictures with labels on
+* **Everything drawn** (diagrams built from shapes and arrows, charts, pictures with labels on
   them, EMF graphics) becomes a picture cut from the slide as PowerPoint renders it. For this PinDeck
   asks PowerPoint (or else Keynote) to save the presentation as a PDF; macOS asks once whether PinDeck
   may control the app. The same PDF gives the thumbnails in the import dialog.
 * **Layout:** blocks that sit side by side become `.cols` with the slide's proportions, others are
   stacked top to bottom; figures and, if needed, the text are scaled so that the slide fits.
-* **Hidden slides** stay hidden (`data-visibility="hidden"`). Audio and video become plain players.
+* **Hidden slides** stay hidden (`data-visibility="hidden"`).
 
 The result is a first draft in the deck's style: check each slide, and ask Claude to rebuild a
-diagram as SVG, turn a table into HTML or tidy a layout. Without PowerPoint or Keynote (or on other
+diagram as SVG or tidy a layout. Without PowerPoint or Keynote (or on other
 systems than macOS) only the text and the pictures are imported.
 
 ## How it works
@@ -153,7 +162,8 @@ systems than macOS) only the text and the pictures are imported.
 | `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` / `pdf presentation` commands for Claude (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
 | `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
-| `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, layout, HTML in the deck's style. |
+| `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, tables, build steps, audio, layout, HTML in the deck's style. |
+| `lib/waveform.mjs` | Waveform SVGs for imported audio. |
 | `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide pictures: PowerPoint or Keynote saves a PDF, macOS PDFKit renders pages and regions of it. |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
@@ -171,6 +181,8 @@ systems than macOS) only the text and the pictures are imported.
 
 ## Versions
 
+* **2.1**: PowerPoint import with build steps (fragments in click order), HTML tables in the deck's table
+  style, audio in the deck's player with a waveform, video with its poster, coloured words as `.hl`.
 * **2.0**: import slides from PowerPoint (`.pptx`): text as HTML in the deck's layouts, pictures copied,
   diagrams, tables and charts as pictures cut from PowerPoint's rendering; thumbnails in the import
   dialog; undo removes the imported slides and their figures.

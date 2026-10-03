@@ -595,9 +595,12 @@ async function applyImport(imp, numbers, afterEid) {
   const eids = all.slice(first, last + 1).map((s) => s.attrs["data-eid"]?.value);
   const range = first === last ? `slide ${first + 1}` : `slides ${first + 1}–${last + 1}`;
   const cut = r.plans.flatMap((p) => p.figures.filter((f) => f.crop && !f.missing).map((f) => f.file));
+  const lost = r.plans.reduce((n, p) => n + (p.lostSteps || 0), 0);
   const turnId = recordHandEdit(before, html, `Imported ${r.fragments.length} slide${r.fragments.length > 1 ? "s" : ""} from ${imp.name} (${range})`,
     `The user imported ${r.fragments.length} slide(s) from the PowerPoint file "${imp.name}" as ${range} (${eids.join(", ")}). ` +
-    `Text became HTML in the deck's layouts; ` + (cut.length ? `diagrams, tables and charts are pictures cut from PowerPoint's rendering of the slide (${cut.join(", ")}). ` : "") +
+    `Text and tables became HTML in the deck's layouts, build steps fragments, audio the deck's audio player; ` +
+    (cut.length ? `diagrams, charts and other drawings are pictures cut from PowerPoint's rendering of the slide (${cut.join(", ")}). ` : "") +
+    (lost ? `${lost} build step(s) on parts of a picture could not be kept. ` : "") +
     `Hidden PowerPoint slides are hidden here too. The layout is a first approximation: check it before relying on it.`,
     { manual: true, addedFiles: r.files });
   return { turnId, index: first, eid: eids[0], count: r.fragments.length, missing: r.plans.flatMap((p) => p.figures.filter((f) => f.missing)).length };
