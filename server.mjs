@@ -297,12 +297,21 @@ const pushStatus = () => broadcast("status", status());
 
 const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md"), "utf8")
   .replaceAll("{{CLI}}", CLI_CMD);
+/* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
+   or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
+   MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
+   the system prompt instead, read afresh at each session start. */
+function deckInstructions() {
+  try { return `\n\n## The deck's CLAUDE.md\n${fs.readFileSync(path.join(DECK_DIR, "CLAUDE.md"), "utf8").trim()}\n`; }
+  catch { return ""; }
+}
 let stderrTail = "";
 const session = new ClaudeSession({
   cwd: DECK_DIR,
   env: { DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN },
   args: () => [
-    "--append-system-prompt", systemPrompt,
+    "--append-system-prompt", systemPrompt + deckInstructions(),
+    "--setting-sources", "", "--strict-mcp-config",   // no settings files, no MCP servers or connectors
     "--permission-mode", "default",
     "--allowedTools", "Read", "Glob", "Grep", ...EDITABLE.map((f) => `Edit(./${f})`), `Bash(${CLI_CMD}:*)`,
     "--disallowedTools", ...LOCKED.flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
@@ -326,10 +335,12 @@ function toolSummary(name, input = {}) {
     case "Read": return { name: "Read", detail: base(input.file_path) };
     case "Edit": case "MultiEdit": case "Write": return { name: "Edit", detail: base(input.file_path) };
     case "Bash": {
-      const cmd = String(input.command || "");
-      const m = cmd.match(/cli\.mjs["']?\s+(\w+)\s*(.*)$/);
+      // a PinDeck command only when the whole command is one: a script that ends in `cli.mjs layout`
+      // must show as the script, or a refused script looks like a refused layout check
+      const cmd = String(input.command || "").trim();
+      const m = cmd.startsWith(CLI_CMD + " ") && cmd.slice(CLI_CMD.length).match(/^\s+(\w+)\s*([^\n;&|<>`$]*)$/);
       return m ? { name: m[1] === "shot" ? "Screenshot" : m[1] === "layout" ? "Check layout" : m[1], detail: m[2].trim() }
-               : { name: "Run", detail: cmd.slice(0, 80) };
+               : { name: "Run", detail: cmd.split("\n")[0].slice(0, 80) };
     }
     case "Glob": case "Grep": return { name, detail: input.pattern || "" };
     default: return { name, detail: "" };
@@ -647,7 +658,7 @@ async function refineImport(imp, pdf, plans, eids, first) {
     `- Equations that are pictures: write them as TeX (\\( \\) or \\[ \\]) if you can read them.\n` +
     `- Tables kept as pictures: make them HTML tables in the deck's table style, marking highlighted rows as the deck does.\n` +
     `- Build steps lost on parts of a diagram: add them back as fragments when you rebuild it.\n` +
-    `- Layout: nothing may overflow or overlap; check with \`${CLI_CMD} layout <n>\`.\n` +
+    `- Layout: nothing may overflow or overlap; check with \`${CLI_CMD} layout ${nums.join(" ")} --issues\`.\n` +
     `Keep the wording of the text and the speaker notes.\n\n${details}`;
   const entry = addEntry({ kind: "user", text: visible });
   startTurn(buildPrompt({ text }), entry);

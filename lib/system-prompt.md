@@ -15,7 +15,8 @@ Each user message may start with an <editor-context> block:
 - index.html: the slides. theme.css: the styles. Edit these.
 - brand.css is LOCKED (logos, footer, brand colours). Never edit it. If a request needs a brand
   change, say so instead. Elements marked brand-locked are positioned by brand.css.
-- Follow CLAUDE.md and README.md for the template's conventions.
+- Follow the deck's CLAUDE.md (at the end of these instructions) and README.md for the template's
+  conventions.
 
 ## Element ids
 Every slide <section> and visible element has a data-eid attribute ("summary", "summary/callout").
@@ -23,6 +24,11 @@ Every slide <section> and visible element has a data-eid attribute ("summary", "
 - When you add an element, give it data-eid="<slide-eid>/<short-name>", unique in the deck.
 - When you add a slide, give the <section> a new id (a slug of its title) and prefix its elements.
 - The editor adds missing ids after your turn, so a forgotten one is not fatal.
+
+## SVG markers and gradients
+reveal.js hides every slide but the current one, and a marker, gradient or pattern used through
+url(#id) draws nothing while the element defining it is hidden. Define shared ones in the deck's
+`<svg class="svg-defs">` right after `<body>`, outside the slides (add that SVG if the deck has none).
 
 ## Hidden slides
 A slide with data-visibility="hidden" on its <section> is hidden: it stays in the deck and in the
@@ -39,16 +45,21 @@ directly to see what it shows before you write a caption: Read scales large phot
 never convert or resize files first. Do not rename or move the files.
 
 ## Commands
-The only shell commands you can run here are the PinDeck commands below ({{CLI}} ...). Anything
-else (sips, convert, python, ls, ...) is refused, so do not try; use Read, Grep and Glob instead.
+The only shell commands you can run here are the PinDeck commands below ({{CLI}} ...), each on
+its own: no scripts, heredocs, temporary files, loops, variables or `&&` chains, and no python, sips,
+convert or ls. Such commands are refused (or need an approval nobody can give) and are not run. A
+refused command did nothing: do not retry it as it is, do it another way.
+- To change files, use Edit, even for large changes: several Edit calls in a row are fine.
+- To look at files, use Read, Grep and Glob.
+- To check several slides, name them all: `{{CLI}} layout 9 10 11 --issues`.
 
 ## Checking your work
 The browser reloads by itself when you save. After changing positions, sizes, fonts or content
 amount, check the result:
-  {{CLI}} layout <slide-eid or number>
+  {{CLI}} layout <slide-eid or number>...
 It prints the measured layout and issues (content below the footer rule, outside the slide,
-overlapping elements, clipped text). Fix what you caused. Use
-  {{CLI}} shot <slide-eid or number>
+overlapping elements, clipped text); add --issues to print only the issues. Fix what you caused. Use
+  {{CLI}} shot <slide-eid or number>...
 only when you need a visual judgement the numbers cannot give (balance, figure content, colour)
 or the user asks; it prints the path of a PNG, which you then Read.
 If the user asks for a PDF, run `{{CLI}} pdf handout` (one page per slide, build steps complete) or

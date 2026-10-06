@@ -1,6 +1,6 @@
 {
   "name": "pindeck",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "PinDeck: a local editor for HTML slide decks. Pin elements, describe the change, and Claude Code edits the slides.",
   "keywords": [
     "slides",

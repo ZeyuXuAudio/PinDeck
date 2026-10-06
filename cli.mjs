@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /* PinDeck command line: Claude's self-checks (need the PinDeck server running) and git setup.
 
-   node cli.mjs layout <slide>   measured layout and issues of one slide
-   node cli.mjs shot <slide>     screenshot with pin markers; prints the PNG path
-   node cli.mjs slides           slide numbers and ids
-   node cli.mjs pdf handout      PDF with one page per slide (build steps in their final state)
-   node cli.mjs pdf presentation PDF with one page per build step
-                                 (add "all" to include hidden slides: pdf handout all)
+   node cli.mjs layout <slide>...   measured layout and issues of one or more slides
+                                    (add --issues for the issues only: layout 9 10 11 --issues)
+   node cli.mjs shot <slide>...     screenshots with pin markers; prints the PNG paths
+   node cli.mjs slides              slide numbers and ids
+   node cli.mjs pdf handout         PDF with one page per slide (build steps in their final state)
+   node cli.mjs pdf presentation    PDF with one page per build step
+                                    (add "all" to include hidden slides: pdf handout all)
 
-   node cli.mjs git-setup [deck] keep PinDeck's data-eid ids out of git (no server needed)
+   node cli.mjs git-setup [deck]    keep PinDeck's data-eid ids out of git (no server needed)
 
    <slide> is a slide id (data-eid), a slide number (1-based) or "current". */
 
@@ -17,7 +18,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-const [cmd, arg] = process.argv.slice(2);
+const [cmd, ...rest] = process.argv.slice(2);
+const arg = rest[0];
 
 /* git-setup: a git "clean" filter strips PinDeck's data-eid attributes whenever git reads the deck's
    HTML, so ids never reach a commit and id-only changes do not show in `git status`. The ids stay in
@@ -42,9 +44,10 @@ if (cmd === "git-setup") {
   console.log(added ? `Added "${line}" to .gitattributes; commit that file.` : `.gitattributes already has "${line}".`);
   process.exit(0);
 }
-const slide = arg || (cmd === "pdf" ? "handout" : "current");
+const issuesOnly = cmd === "layout" && rest.includes("--issues");
+const slides = rest.filter((a) => a !== "--issues");
 if (!["layout", "shot", "slides", "pdf"].includes(cmd)) {
-  console.error("Usage: node cli.mjs layout|shot <slide>  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation  |  node cli.mjs git-setup [deck]");
+  console.error("Usage: node cli.mjs layout|shot <slide>... [--issues]  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation  |  node cli.mjs git-setup [deck]");
   process.exit(2);
 }
 
@@ -58,13 +61,24 @@ if (!url || !token) {
 }
 if (!url) { console.error("The PinDeck server is not running (start it with: pindeck <deck-folder>)."); process.exit(1); }
 
-try {
-  const extra = cmd === "pdf" && process.argv[4] === "all" ? { all: "1" } : {};
-  const res = await fetch(`${url}/api/${cmd}?` + new URLSearchParams({ slide, ...extra }), { headers: { "x-editor-token": token } });
-  const out = await res.text();
+/* layout and shot take several slides, so Claude needs no shell loop or pipe (which PinDeck refuses) */
+const queries = cmd === "pdf" ? [{ slide: rest[0] || "handout", ...(rest[1] === "all" ? { all: "1" } : {}) }]
+  : cmd === "slides" ? [{}] : (slides.length ? slides : ["current"]).map((slide) => ({ slide }));
+let ok = true;
+for (const q of queries) {
+  let res, out;
+  try {
+    res = await fetch(`${url}/api/${cmd}?` + new URLSearchParams(q), { headers: { "x-editor-token": token } });
+    out = await res.text();
+  } catch {
+    console.error("Cannot reach the PinDeck server at " + url + ". Is it running?");
+    process.exit(1);
+  }
+  if (res.ok && issuesOnly) {
+    const lines = out.split("\n"), i = lines.findIndex((l) => l.startsWith("Issues"));
+    out = [lines[0], ...lines.slice(i)].join("\n");
+  }
   (res.ok ? console.log : console.error)(out);
-  process.exit(res.ok ? 0 : 1);
-} catch {
-  console.error("Cannot reach the PinDeck server at " + url + ". Is it running?");
-  process.exit(1);
+  ok &&= res.ok;
 }
+process.exit(ok ? 0 : 1);

@@ -161,7 +161,7 @@ svg.diagram .lbl.grey{ fill: var(--slate); }
 svg.diagram .wire    { fill: none; stroke: var(--ocean); stroke-width: 3; stroke-linecap: round; }
 svg.diagram .wire.arrow { marker-end: url(#arrowhead); }
 svg.diagram .zone    { fill: var(--shell); }
-svg.diagram #arrowhead path { fill: var(--ocean); }
+#arrowhead path { fill: var(--ocean); }
 svg.diagram .wire.flow { stroke-dasharray: 10 8; animation: flow 1.1s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -36; } }
 

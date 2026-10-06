@@ -152,13 +152,15 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **Layout instead of screenshots.** With each message the editor measures the current slide and
   every pinned slide in your browser: position and size of every element, font sizes, and issues
   (content below the footer rule, outside the slide, overlaps, clipped text). Claude gets this as
-  text. To check its own work it runs `node ../cli.mjs layout <slide>`. Screenshots are
+  text. To check its own work it runs `node ../cli.mjs layout <slide>...` (`--issues` for the
+  issues only). Screenshots are
   only taken when you tick the box or Claude needs a visual judgement.
 * **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
   running, so there is no start-up delay per message. It runs in the deck folder under your Claude
-  login, with `--append-system-prompt` from `lib/system-prompt.md`.
+  login, with `--append-system-prompt` from `lib/system-prompt.md` and the deck's `CLAUDE.md`.
 * **Permissions.** Claude may read files, edit `index.html` and `theme.css`, and run the editor's
-  CLI. Nothing else, and in particular no edits to `brand.css`. If `brand.css` changes during a
+  CLI. Nothing else, and in particular no edits to `brand.css`. Claude Code loads no settings files
+  and no MCP servers, so no allow rule in your own, the deck's or a parent folder's settings widens this. If `brand.css` changes during a
   turn anyway, the server restores it and says so in the chat.
 * **Undo.** The server keeps a copy of the editable files from before each change (a Claude turn
   or a hand edit). Undo and redo walk that history and tell Claude on the next message.
@@ -191,6 +193,10 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.3**: lessons from a PowerPoint hand-off. Claude Code runs without settings files or MCP servers
+  (the deck's `CLAUDE.md` goes into the system prompt instead), so stray allow rules no longer let it run
+  scripts; `layout` takes several slides and `--issues`; the chat no longer labels a refused script as a
+  layout check; shared SVG arrowheads live outside the slides, where hidden slides cannot hide them.
 * **2.2**: PowerPoint import with equations as TeX for KaTeX, and the hand-off to Claude: complex slides are
   tagged in the import dialog and, if wanted, improved by Claude right after the import, with a picture of
   each original slide.
