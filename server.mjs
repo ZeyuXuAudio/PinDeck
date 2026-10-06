@@ -21,7 +21,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, setAttr, elementEnd } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, moveSlide, setAttr, elementEnd } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -813,6 +813,18 @@ const server = http.createServer(async (req, res) => {
         `data-visibility="hidden": they stay in the file but are skipped when presenting and in PDF exports.`,
         { manual: true, chat: false });   // the editor reloads the slide itself; undo is in the toolbar
       return json(res, 200, { turnId, index });
+    }
+    if (p === "/api/move-slide" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const r = moveSlide(before[DECK_FILE], b.eid, b.before ?? null);
+      if (r.error) return json(res, 409, { error: r.error });
+      if (!r.changed) return json(res, 200, { unchanged: true, index: r.from });
+      const turnId = recordHandEdit(before, r.html, `Moved slide ${r.from + 1} to ${r.index + 1}`,
+        `The user moved slide ${r.from + 1} (${b.eid}) to position ${r.index + 1}; the slides in between changed numbers.`,
+        { manual: true, chat: false });   // the editor reloads itself on the moved slide; undo is in the toolbar
+      return json(res, 200, { turnId, index: r.index });
     }
     if (p === "/api/add-slide" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });

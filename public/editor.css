@@ -96,6 +96,12 @@ code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: 
   font-size: 12.5px; color: var(--muted); cursor: pointer; }
 .slide-list li { position: relative; }
 .slide-list li.hidden-slide .t, .slide-list li.hidden-slide .s, .slide-list li.hidden-slide .num { opacity: .45; }
+/* moving slides: the dragged slide fades, an orange line shows where it will go */
+.slide-list li.dragging { opacity: .4; }
+.slide-list li.drop-before::before, .slide-list li.drop-after::after { content: ""; position: absolute; left: 4px; right: 4px;
+  height: 2px; background: var(--orange); border-radius: 1px; pointer-events: none; }
+.slide-list li.drop-before::before { top: -2px; }
+.slide-list li.drop-after::after { bottom: -2px; }
 .slide-list .kind.hid { color: var(--orange); border-color: #f2c48a; }
 .slide-list .eye { position: absolute; right: 4px; bottom: 4px; display: none; width: 24px; height: 22px; padding: 0;
   border: 0; background: none; color: var(--muted); }

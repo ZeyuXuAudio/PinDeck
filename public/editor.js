@@ -189,7 +189,7 @@ function renderSlides() {
   const counts = {};
   state.pins.forEach((p) => (counts[p.slide.index] = (counts[p.slide.index] || 0) + 1));
   $("slide-list").innerHTML = state.slides.map((s, i) => `
-    <li data-i="${i}" class="${i === state.current ? "active" : ""} ${s.hidden ? "hidden-slide" : ""}" title="${esc(s.eid)}">
+    <li data-i="${i}" class="${i === state.current ? "active" : ""} ${s.hidden ? "hidden-slide" : ""}" title="${esc(s.eid)}" draggable="true">
       <span class="num">${i + 1}</span>
       <span><div class="t">${esc(s.title)}</div>${s.sub ? `<div class="s">${esc(s.sub)}</div>` : ""}
         ${s.kind !== "content" ? `<span class="kind">${esc(s.kind.replace(/-slide$/, ""))}</span>` : ""}
@@ -206,6 +206,65 @@ $("slide-list").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-i]");
   if (li) goto(+li.dataset.i);
 });
+
+/* ---- Move slides: drag one in the slide list -------------------------------------------------------
+   A line shows where it will go; the editor then opens the moved slide at its new place. */
+const slideList = $("slide-list");
+let dragFrom = null;
+// insertion index for a pointer at y: before the first slide whose middle is below it, else at the end
+function dropIndex(y) {
+  const lis = [...slideList.querySelectorAll("li[data-i]")];
+  const i = lis.findIndex((li) => { const r = li.getBoundingClientRect(); return y < r.top + r.height / 2; });
+  return i < 0 ? lis.length : i;
+}
+function showDrop(i) {
+  slideList.querySelectorAll(".drop-before, .drop-after").forEach((li) => li.classList.remove("drop-before", "drop-after"));
+  if (i == null || i === dragFrom || i === dragFrom + 1) return;   // dropping there would not move it
+  const lis = slideList.querySelectorAll("li[data-i]");
+  if (i < lis.length) lis[i].classList.add("drop-before");
+  else lis[lis.length - 1]?.classList.add("drop-after");
+}
+slideList.addEventListener("dragstart", (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (!li || state.busy) return e.preventDefault();
+  dragFrom = +li.dataset.i;
+  li.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", state.slides[dragFrom]?.eid || "");
+});
+slideList.addEventListener("dragover", (e) => {
+  if (dragFrom == null) return;   // not one of our slides (a file, say)
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  showDrop(dropIndex(e.clientY));
+});
+slideList.addEventListener("dragleave", (e) => { if (!slideList.contains(e.relatedTarget)) showDrop(null); });
+slideList.addEventListener("dragend", () => {
+  showDrop(null);
+  slideList.querySelector(".dragging")?.classList.remove("dragging");
+  dragFrom = null;
+});
+slideList.addEventListener("drop", (e) => {
+  if (dragFrom == null) return;
+  e.preventDefault();
+  const from = dragFrom, to = dropIndex(e.clientY);
+  showDrop(null);
+  if (to !== from && to !== from + 1) moveSlideTo(from, to);
+});
+async function moveSlideTo(from, to) {   // to: insertion index in the current list
+  const s = state.slides[from];
+  if (!s) return;
+  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  flushNudge();
+  await editChain;
+  const res = await api("move-slide", { eid: s.eid, before: state.slides[to]?.eid ?? null });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) return toast(d.error || "Could not move the slide.");
+  if (d.unchanged) return;
+  state.current = d.index;   // the reload opens the moved slide
+  try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
+  loadMain();
+}
 
 /* ---- Hide and show slides -------------------------------------------------------------------------
    A hidden slide gets data-visibility="hidden" (reveal.js): it stays in the deck and in PinDeck, but is

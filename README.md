@@ -79,6 +79,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
 | Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts, and Claude can improve the complex ones; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
+| Move a slide | Drag it up or down in the slide list; an orange line shows where it will go. It moves with its notes and the comment above it, and `⌘Z` puts it back. Slides inside vertical stacks cannot be moved yet. |
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
@@ -193,6 +194,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.4**: move slides by dragging them in the slide list; undo puts them back.
 * **2.3**: lessons from a PowerPoint hand-off. Claude Code runs without settings files or MCP servers
   (the deck's `CLAUDE.md` goes into the system prompt instead), so stray allow rules no longer let it run
   scripts; `layout` takes several slides and `--issues`; the chat no longer labels a refused script as a
