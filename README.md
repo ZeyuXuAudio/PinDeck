@@ -194,6 +194,9 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.4.1**: the layout check judges a plain container by what it draws (its children), not by its box, so
+  a body stretched down to the references no longer counts as an overlap; a real overlap is reported once,
+  for the outermost pair.
 * **2.4**: move slides by dragging them in the slide list; undo puts them back.
 * **2.3**: lessons from a PowerPoint hand-off. Claude Code runs without settings files or MCP servers
   (the deck's `CLAUDE.md` goes into the system prompt instead), so stray allow rules no longer let it run

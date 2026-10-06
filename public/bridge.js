@@ -148,17 +148,40 @@
       meta.push({ el, e, hidden, cs, inSvg: !!el.closest("svg") && el.tagName.toLowerCase() !== "svg" });
     }
 
+    /* What an element draws, for the checks below: a plain container (no text of its own, no
+       background, border or shadow) draws only its children, so the empty part of a box stretched by
+       flex or a fixed height (a slide-body filling the slide down to the references, say) does not
+       count as an overlap. The layout listing keeps the real boxes. */
+    const MEDIA = /^(IMG|SVG|VIDEO|AUDIO|CANVAS|IFRAME|OBJECT|TABLE|PICTURE)$/i;
+    const paints = (cs) => cs.backgroundImage !== "none" || !/^(transparent|rgba\(.*,\s*0\))$/.test(cs.backgroundColor) ||
+      cs.boxShadow !== "none" || ["Top", "Right", "Bottom", "Left"].some((s) => parseFloat(cs[`border${s}Width`]) > 0 && cs[`border${s}Style`] !== "none");
+    const drawn = new Map();   // el -> { x, y, w, h }
+    for (const { el, e, hidden, cs } of [...meta].reverse()) {   // children before their parents
+      if (hidden) continue;
+      const box = { x: e.x, y: e.y, w: e.w, h: e.h };
+      if (el !== sec && !textOf(el, true) && !MEDIA.test(el.tagName) && !paints(cs)) {
+        const kids = meta.filter((m) => drawn.has(m.el) && m.el.parentElement?.closest("[data-eid]") === el).map((m) => drawn.get(m.el));
+        if (kids.length) {
+          const x0 = Math.min(...kids.map((k) => k.x)), y0 = Math.min(...kids.map((k) => k.y));
+          const x1 = Math.max(...kids.map((k) => k.x + k.w)), y1 = Math.max(...kids.map((k) => k.y + k.h));
+          Object.assign(box, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        }
+      }
+      drawn.set(el, box);
+    }
+
     const issues = [];
     const rel = (eid) => (eid.startsWith(si.eid + "/") ? eid.slice(si.eid.length) : eid);
     const flagged = new Set();
     const underFlagged = (el) => { for (let p = el.parentElement; p; p = p.parentElement) if (flagged.has(p)) return true; return false; };
     for (const { el, e, hidden, cs } of meta) {
       if (el === sec || hidden || e.locked) continue;
-      if (e.x < -1 || e.y < -1 || e.x + e.w > W + 1 || e.y + e.h > H + 1) {
-        if (!underFlagged(el)) issues.push(`${rel(e.eid)} extends outside the slide (box x=${e.x}..${e.x + e.w}, y=${e.y}..${e.y + e.h})`);
+      const d = drawn.get(el);
+      if (d.x < -1 || d.y < -1 || d.x + d.w > W + 1 || d.y + d.h > H + 1) {
+        if (!underFlagged(el)) issues.push(`${rel(e.eid)} extends outside the slide (box x=${d.x}..${d.x + d.w}, y=${d.y}..${d.y + d.h})`);
         flagged.add(el);
-      } else if (si.hasFooter && FOOTER_TOP != null && e.y + e.h > FOOTER_TOP + 1 && e.y < H) {
-        if (!underFlagged(el)) issues.push(`${rel(e.eid)} reaches y=${e.y + e.h}, below the footer rule (y=${FOOTER_TOP})`);
+      } else if (si.hasFooter && FOOTER_TOP != null && d.y + d.h > FOOTER_TOP + 1 && d.y < H) {
+        if (!underFlagged(el)) issues.push(`${rel(e.eid)} reaches y=${d.y + d.h}, below the footer rule (y=${FOOTER_TOP})`);
         flagged.add(el);
       }
       const clips = /(hidden|clip|auto|scroll)/.test(cs.overflowX + cs.overflowY);
@@ -166,8 +189,10 @@
         issues.push(`${rel(e.eid)} clips its content (${Math.max(el.scrollHeight - el.clientHeight, el.scrollWidth - el.clientWidth)} px hidden)`);
     }
     // Overlaps between elements that are not nested in each other (SVG groups excluded: they overlap by design)
-    const cand = meta.filter((m) => m.el !== sec && !m.hidden && !m.e.locked && !m.inSvg && m.e.w * m.e.h > 0);
+    const cand = meta.filter((m) => m.el !== sec && !m.hidden && !m.e.locked && !m.inSvg && m.e.w * m.e.h > 0)
+      .map((m) => ({ ...m, e: { ...m.e, ...drawn.get(m.el) } }));   // the overlap test uses what each element draws
     let overlaps = 0;
+    const reported = [];   // [el, el] pairs already reported
     for (let i = 0; i < cand.length && overlaps < 8; i++) {
       for (let j = i + 1; j < cand.length && overlaps < 8; j++) {
         const a = cand[i], b = cand[j];
@@ -180,6 +205,9 @@
         // skip pairs whose ancestors already overlap (report the outermost pair only)
         const pa = a.el.parentElement?.closest("[data-eid]"), pb = b.el.parentElement?.closest("[data-eid]");
         if (pa && pb && pa !== pb && !pa.contains(pb) && !pb.contains(pa) && pa !== sec && pb !== sec) continue;
+        // ... and pairs inside a reported pair (the bullets of a slide-body that overlaps the references)
+        if (reported.some(([p, q]) => (p.contains(a.el) && q.contains(b.el)) || (p.contains(b.el) && q.contains(a.el)))) continue;
+        reported.push([a.el, b.el]);
         issues.push(`${rel(a.e.eid)} overlaps ${rel(b.e.eid)} (${ix} x ${iy} px)`);
         overlaps++;
       }
