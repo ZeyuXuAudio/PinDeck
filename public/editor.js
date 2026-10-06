@@ -69,12 +69,14 @@ window.__editorHost = {
     if (state.pendingTitleEdit) { state.pendingTitleEdit = false; setTimeout(() => bridge.editTitle(), 50); }
     renderSlides();
     renderToolbar();
+    loadNotes();
   },
   slideChanged(index) {
     state.current = index;
     try { localStorage.setItem("editor.slide", String(index)); } catch {}
     renderSlides();
     renderToolbar();
+    loadNotes();
     api("current", { index, eid: state.slides[index]?.eid });
   },
   addPin(pin) {
@@ -265,6 +267,98 @@ async function moveSlideTo(from, to) {   // to: insertion index in the current l
   try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
   loadMain();
 }
+
+/* ---- Speaker notes: the field under the slide -------------------------------------------------------
+   Shows the current slide's <aside class="notes"> and saves it as a hand edit when the field loses focus
+   or on ⌘Enter; Esc puts back what the file says. Notes with markup other than line breaks are edited
+   as their HTML ("HTML" in the header). Typing is never overwritten by a reload. */
+const notesBox = $("notes");
+let notes = { eid: null, text: "", html: false };   // the notes as the file has them
+let notesSeq = 0;
+const notesDirty = () => !!notes.eid && notesBox.value.trim() !== notes.text.trim();
+function notesStatus(msg) {
+  $("notes-status").textContent = msg ?? (notes.html ? "HTML" : "");
+  $("notes-status").title = msg ? "" : notes.html ? "These notes contain formatting, so you edit them as HTML" : "";
+}
+async function loadNotes() {
+  const eid = state.slides[state.current]?.eid;
+  if (!eid || document.activeElement === notesBox) return;
+  const seq = ++notesSeq;
+  await editChain.catch(() => {});   // a save still on its way would otherwise be read back as the old text
+  if (seq !== notesSeq) return;
+  const res = await api(`notes?${new URLSearchParams({ eid })}`).catch(() => null);
+  const d = res?.ok ? await res.json().catch(() => null) : null;
+  if (seq !== notesSeq || document.activeElement === notesBox) return;   // a newer load, or the user started typing
+  notes = { eid, text: d?.text || "", html: !!d?.html };
+  notesBox.value = notes.text;
+  notesStatus();
+}
+function saveNotes() {
+  if (!notesDirty()) return;
+  const edit = { eid: notes.eid, text: notesBox.value, html: notes.html };
+  flushNudge();
+  editChain = editChain.then(async () => {
+    notesStatus("Saving…");
+    const res = await api("notes", edit);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { notesStatus(); return toast(d.error || "Could not save the notes."); }   // the text stays, to save again
+    if (notes.eid === edit.eid) notes.text = edit.text;
+    notesStatus("Saved");
+    setTimeout(() => { if ($("notes-status").textContent === "Saved") notesStatus(); }, 1500);
+  });
+}
+notesBox.addEventListener("blur", () => { saveNotes(); loadNotes(); });   // then show the slide we are on now
+notesBox.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); notesBox.blur(); }
+  else if (e.key === "Escape") { e.preventDefault(); notesBox.value = notes.text; notesBox.blur(); }
+});
+// closing the tab while typing: send what is there (sendBeacon cannot set headers, hence the token in the URL)
+addEventListener("pagehide", () => {
+  if (notesDirty() && !state.busy)
+    navigator.sendBeacon(`/api/notes?t=${TOKEN}`, new Blob([JSON.stringify({ eid: notes.eid, text: notesBox.value, html: notes.html })]));
+});
+function setNotesOpen(open) {
+  $("notes-panel").classList.toggle("collapsed", !open);
+  $("notes-toggle").setAttribute("aria-expanded", String(open));
+  try { localStorage.setItem("editor.notes", open ? "open" : "closed"); } catch {}
+}
+$("notes-toggle").onclick = () => setNotesOpen($("notes-panel").classList.contains("collapsed"));
+// height of the notes: drag the panel's top edge (or ↑ ↓ on it); double-click for the default size
+const NOTES_H = 96, NOTES_MIN = 44;
+function setNotesHeight(h, save = true) {
+  const max = Math.max(NOTES_MIN, $("stage").parentElement.clientHeight * 0.6);
+  h = Math.round(Math.min(max, Math.max(NOTES_MIN, h)));
+  notesBox.style.height = h + "px";
+  $("notes-split").setAttribute("aria-valuenow", String(h));
+  if (save) try { localStorage.setItem("editor.notesHeight", String(h)); } catch {}
+}
+$("notes-split").addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const split = $("notes-split"), y0 = e.clientY, h0 = notesBox.offsetHeight;
+  split.setPointerCapture(e.pointerId);
+  document.body.classList.add("resizing-notes");
+  const move = (ev) => setNotesHeight(h0 - (ev.clientY - y0));
+  const up = () => {
+    document.body.classList.remove("resizing-notes");
+    split.removeEventListener("pointermove", move);
+    split.removeEventListener("pointerup", up);
+    split.removeEventListener("pointercancel", up);
+  };
+  split.addEventListener("pointermove", move);
+  split.addEventListener("pointerup", up);
+  split.addEventListener("pointercancel", up);
+});
+$("notes-split").addEventListener("dblclick", () => setNotesHeight(NOTES_H));
+$("notes-split").addEventListener("keydown", (e) => {
+  const step = e.shiftKey ? 64 : 16;
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  e.stopPropagation();   // not a slide change
+  setNotesHeight(notesBox.offsetHeight + (e.key === "ArrowUp" ? step : -step));
+});
+setNotesHeight((() => { try { return +localStorage.getItem("editor.notesHeight") || NOTES_H; } catch { return NOTES_H; } })(), false);
+setNotesOpen((() => { try { return localStorage.getItem("editor.notes") !== "closed"; } catch { return true; } })());
 
 /* ---- Hide and show slides -------------------------------------------------------------------------
    A hidden slide gets data-visibility="hidden" (reveal.js): it stays in the deck and in PinDeck, but is
@@ -509,6 +603,7 @@ $("diff-close").onclick = () => $("diff-dialog").close();
 
 function setBusy(busy) {
   state.busy = busy;
+  $("notes").readOnly = busy;   // hand edits wait until Claude has finished
   $("working").hidden = !busy;
   main?.bridge.setEditable(!busy);
   $("send").hidden = busy;

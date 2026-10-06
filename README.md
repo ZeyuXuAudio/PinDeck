@@ -79,6 +79,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
 | Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts, and Claude can improve the complex ones; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
+| Speaker notes | The **Notes** field under the slide shows the current slide's notes (the speaker view, `S`, shows them when presenting). Type to change them; they are saved when you click elsewhere or press `⌘Enter`, and `Esc` puts back what was there. A slide without notes gets them; emptying the field removes them. Notes with formatting other than line breaks are edited as HTML. Drag the line above the notes to give them more or less room (double-click it for the default size); collapse them with their header. |
 | Move a slide | Drag it up or down in the slide list; an orange line shows where it will go. It moves with its notes and the comment above it, and `⌘Z` puts it back. Slides inside vertical stacks cannot be moved yet. |
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
@@ -194,6 +195,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.5**: a notes field under the slide for the speaker notes, saved as hand edits with undo.
 * **2.4.1**: the layout check judges a plain container by what it draws (its children), not by its box, so
   a body stretched down to the references no longer counts as an overlap; a real overlap is reported once,
   for the outermost pair.

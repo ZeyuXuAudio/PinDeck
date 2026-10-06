@@ -63,6 +63,14 @@
     </div>
     <div id="pin-hint" class="pin-hint" hidden>Pin mode: click elements on the slide. Click a marker to remove it. <kbd>Esc</kbd> to stop.</div>
     <div id="stage" class="stage"><div id="toast" class="toast" role="status" hidden></div></div>
+    <section id="notes-panel" class="notes-panel" aria-label="Speaker notes">
+      <div id="notes-split" class="notes-split" role="separator" aria-orientation="horizontal" aria-controls="notes" tabindex="0"
+        title="Drag to resize the notes (double-click: default size)" aria-label="Resize the speaker notes"></div>
+      <button id="notes-toggle" class="notes-head" aria-expanded="true" aria-controls="notes" title="Show or hide the speaker notes">
+        <span class="caret" aria-hidden="true">▾</span> Notes <span id="notes-status" class="notes-status"></span></button>
+      <textarea id="notes" spellcheck="true" aria-label="Speaker notes of this slide"
+        placeholder="Speaker notes for this slide, shown in the speaker view (S) when presenting. Saved when you click elsewhere or press ⌘Enter; Esc undoes your typing."></textarea>
+    </section>
   </main>
 
   <!-- Right: chat with Claude -->

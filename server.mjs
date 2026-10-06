@@ -21,7 +21,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, moveSlide, setAttr, elementEnd } from "./lib/eids.mjs";
+import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, moveSlide, getNotes, setNotes, setAttr, elementEnd } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
@@ -967,6 +967,25 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/source") {
       const html = getInner(readDeck(DECK_FILE), url.searchParams.get("eid"), JSON.parse(url.searchParams.get("path") || "[]"));
       return html == null ? json(res, 404, { error: "Element not found in the file." }) : json(res, 200, { html });
+    }
+    // Speaker notes of a slide: read for the notes field, saved as a hand edit
+    if (p === "/api/notes" && req.method === "GET") {
+      const n = getNotes(readDeck(DECK_FILE), url.searchParams.get("eid"));
+      return n ? json(res, 200, n) : json(res, 404, { error: "Slide not found in the file." });
+    }
+    if (p === "/api/notes" && req.method === "POST") {
+      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      const b = await body(req);
+      const before = snapshot(EDITABLE);
+      const r = setNotes(before[DECK_FILE], b.eid, b.text, !!b.html);
+      if (!r) return json(res, 404, { error: "Slide not found in the file." });
+      if (!r.changed) return json(res, 200, { unchanged: true });
+      const n = findSlides(parse(before[DECK_FILE])).findIndex((s) => s.attrs["data-eid"]?.value === b.eid) + 1;
+      const text = String(b.text || "").trim();
+      const turnId = recordHandEdit(before, r.html, text ? `Edited the notes of slide ${n}` : `Removed the notes of slide ${n}`,
+        text ? `The user edited the speaker notes of slide ${n} (${b.eid}) by hand. They now read: "${text.slice(0, 300)}".`
+             : `The user removed the speaker notes of slide ${n} (${b.eid}).`);   // manual: the slide itself does not change
+      return json(res, 200, { turnId });
     }
     if (p === "/api/text" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
