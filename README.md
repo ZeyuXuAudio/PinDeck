@@ -144,6 +144,7 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.12.1**: the PinDeck pin as the browser tab icon (SVG, with PNG versions for Safari).
 * **1.12**: double-clicking an equation opens its text with the equation's TeX selected, also for
   equations on their own line and for parts KaTeX draws as SVG (roots, wide accents, arrows).
 * **1.11.3**: a calmer interface: no slide count, no Hide/Show button in the header (eye and `H`

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The PinDeck pin, as .brand-pin in editor.css: a square with three round corners, turned so the
+       sharp one points down; orange rim, white centre -->
+  <g transform="translate(16 13.9) rotate(-45)">
+    <path d="M-10 10V0A10 10 0 0 1 0-10A10 10 0 0 1 10 0A10 10 0 0 1 0 10Z" fill="#ED8C01"/>
+    <path d="M-4.3 4.3V0A4.3 4.3 0 0 1 0-4.3A4.3 4.3 0 0 1 4.3 0A4.3 4.3 0 0 1 0 4.3Z" fill="#fff"/>
+  </g>
+</svg>
