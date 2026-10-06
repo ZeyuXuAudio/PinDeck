@@ -144,6 +144,8 @@ the files changed. CSS changes are swapped in without a reload.
 
 ## Versions
 
+* **1.12**: double-clicking an equation opens its text with the equation's TeX selected, also for
+  equations on their own line and for parts KaTeX draws as SVG (roots, wide accents, arrows).
 * **1.11.3**: a calmer interface: no slide count, no Hide/Show button in the header (eye and `H`
   remain), no messages or chat entries for hiding and showing, shorter export descriptions.
 * **1.11.2**: the header shows the deck's name instead of the slide title; the browser tab is named after the deck.

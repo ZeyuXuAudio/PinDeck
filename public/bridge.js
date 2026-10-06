@@ -565,11 +565,12 @@
   const TEXT_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "dt", "dd", "td", "th", "caption",
     "figcaption", "blockquote", "pre", "button", "span", "small", "label"]);
   const hasOwnText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim());
-  const isTextual = (el) => TEXT_TAGS.has(el.tagName.toLowerCase()) || hasOwnText(el);
+  const isTextual = (el) => TEXT_TAGS.has(el.tagName.toLowerCase()) || hasOwnText(el) || !!el.querySelector(".katex");
 
   /* What a double-click on t would edit: the element with an id around it, or a table cell. */
   function textTargetOf(t) {
-    if (t.closest?.("svg")) return { why: "Text inside a diagram cannot be edited here yet. Pin it and ask Claude." };
+    // KaTeX draws roots, wide accents and arrows as SVG: those belong to the equation, not to a diagram
+    if (t.closest?.("svg") && !t.closest(".katex")) return { why: "Text inside a diagram cannot be edited here yet. Pin it and ask Claude." };
     const tt = targetOf(t);
     if (!tt) return null;
     if (tt.foot || tt.locked) return { why: `${tt.foot ? "The footer is" : "This element is"} set by brand.css and locked.` };
@@ -585,7 +586,10 @@
     const t = textTargetOf(target);
     if (!t) return;
     if (t.why) return host()?.toast(t.why);
-    startEdit(t, x, y);
+    // a double-click on an equation opens the text with that equation's TeX selected
+    const k = target.closest?.(".katex");
+    const math = k && t.el.contains(k) ? [...t.el.querySelectorAll(".katex")].indexOf(k) : -1;
+    startEdit(t, x, y, math >= 0 ? { math } : {});
   }
   function editSelection(opts) {
     if (!sel) return false;
@@ -618,9 +622,27 @@
     el.addEventListener("paste", onEditPaste);
     el.addEventListener("blur", onEditBlur);
     el.focus({ preventScroll: true });
-    placeCaret(el, x, y, opts.caret);
+    if (!(opts.math >= 0 && selectMath(el, opts.math))) placeCaret(el, x, y, opts.caret);
     showEditHint(true);
     host()?.editingChanged(true);
+  }
+  /* Selects the TeX between the delimiters of the n-th equation (\( \) or \[ \]) in the source shown */
+  function selectMath(el, n) {
+    const nodes = [], w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let text = "";
+    for (let node; (node = w.nextNode());) { nodes.push({ node, at: text.length }); text += node.nodeValue; }
+    const m = [...text.matchAll(/\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g)][n];
+    if (!m) return false;
+    const where = (i) => { const hit = nodes.findLast((x) => x.at <= i); return [hit.node, i - hit.at]; };
+    const tex = m[1] ?? m[2], lead = tex.length - tex.trimStart().length;
+    const start = m.index + 2 + lead, end = m.index + 2 + tex.trimEnd().length;
+    const r = document.createRange();
+    r.setStart(...where(start));
+    r.setEnd(...where(end));
+    const s = getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    return true;
   }
   function placeCaret(el, x, y, where) {
     const s = getSelection();
