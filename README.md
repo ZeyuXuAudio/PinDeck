@@ -196,6 +196,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.6.1**: tinted table rows are one rectangle per row instead of one per cell, so PDF viewers show no hairline seams between the cells.
 * **2.6**: booktabs-style tables in both example decks (rules at top, under the header and at the bottom,
   short rules under grouped headings, numbers right-aligned); the import writes row groups without `rowspan`.
 * **2.5**: a notes field under the slide for the speaker notes, saved as hand edits with undo.
