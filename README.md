@@ -98,8 +98,9 @@ The import keeps what can be carried over exactly and makes pictures of the rest
   kicker, as the deck does it), bullets with their levels, bold, italics, coloured words (as `.hl`),
   superscripts, links and line breaks, other text as paragraphs, references at the bottom of a slide
   as `.refs`, and the speaker notes. Side notes and labels clearly smaller than the body text stay smaller.
-* **Tables become HTML tables** with the class of the deck's own tables, merged cells, header rows
-  and a caption from the text above them. A table with shapes drawn over it (e.g. boxes marking rows)
+* **Tables become HTML tables** with the class of the deck's own tables, merged header cells, header rows
+  and a caption from the text above them. Cells merged down in the body become a label on the group's
+  first row with empty cells below it, and each later group's first row gets `class="group"`. A table with shapes drawn over it (e.g. boxes marking rows)
   is kept as a picture instead.
 * **Build steps:** shapes and paragraphs that appear (or disappear) on a click become reveal.js
   fragments in the same order, also when several things appear on one click. A picture made of several
@@ -195,6 +196,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.6**: booktabs-style tables in both example decks (rules at top, under the header and at the bottom,
+  short rules under grouped headings, numbers right-aligned); the import writes row groups without `rowspan`.
 * **2.5**: a notes field under the slide for the speaker notes, saved as hand edits with undo.
 * **2.4.1**: the layout check judges a plain container by what it draws (its children), not by its box, so
   a body stretched down to the references no longer counts as an overlap; a real overlap is reported once,

@@ -39,7 +39,7 @@ a sweeping waveform cursor, a summary with a callout, and a closing slide.
 | `.cols`, `.cols.wide-left`, `.cols.wide-right`, `.stack` | two columns, or a vertical stack |
 | `figure.fig` | image or SVG with caption |
 | `.callout` | one highlighted message per slide |
-| `table.results`, `tr.ours` | clean table, highlighted row |
+| `table.results` (`.compact`), rows `.ours` `.best` `.focus` `.muted` `.group` | booktabs-style table; rules in `CLAUDE.md` |
 | `.eq-list` / `.eq-item` / `.where` | labelled equations and a symbol list |
 | `.stats` / `.stat` | key numbers with gradient figures |
 | `svg.diagram` with `.box`, `.box.key`, `.box.out`, `.wire.arrow`, `.wire.flow` | block diagrams |

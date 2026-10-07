@@ -111,15 +111,36 @@ figure.fig figcaption { font-size: 17px; line-height: 1.35; color: var(--slate);
 .closing-slide .contact strong { color: #fff; }
 .closing-slide .contact .link { color: var(--spray); }
 
-/* ---- Results table -------------------------------------------------------------------- */
-table.results { width: 100%; border-collapse: collapse; font-size: 22px; font-variant-numeric: tabular-nums; }
+/* ---- Results table (booktabs) ------------------------------------------------------------
+   Heavy rules at top and bottom, a light rule under the header, trimmed light rules under
+   group headings (th[colspan]), no rules between body rows. Text left, numbers right.
+   A group label sits on the group's first row only (td.grp, no rowspan); tr.group adds space
+   above a new group. Row classes: .ours/.best (ocean blue), .focus (tinted band), .muted (grey). */
+table.results { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 22px; font-variant-numeric: tabular-nums;
+  border-top: 2px solid var(--deep); border-bottom: 2px solid var(--deep); }
 table.results caption { caption-side: top; text-align: left; font-size: var(--fs-small); color: var(--slate); padding-bottom: 10px; }
-table.results th, table.results td { padding: 12px 14px; text-align: center; white-space: nowrap; }
-table.results th:first-child, table.results td:first-child { text-align: left; }
-table.results thead th { font-weight: 700; color: var(--deep); border-bottom: 2px solid var(--deep); }
-table.results tbody td { border-bottom: 1px solid var(--line); }
-table.results tbody tr:last-child td { border-bottom: 2px solid var(--deep); }
-table.results tr.ours td { color: var(--ocean); font-weight: 700; background: var(--foam); }
+table.results th, table.results td { padding: 6px 14px; text-align: right; white-space: nowrap; background-clip: padding-box; }
+table.results thead tr:first-child th:first-child, table.results tbody td:first-child,
+table.results th.l, table.results td.l { text-align: left; }
+table.results thead th { font-weight: 400; color: var(--deep); vertical-align: bottom; padding-top: 10px; }
+table.results thead tr:last-child th, table.results thead th[rowspan] { border-bottom: 1px solid var(--deep); padding-bottom: 8px; }
+table.results thead th[colspan] { text-align: center;
+  background: linear-gradient(var(--deep), var(--deep)) center bottom / calc(100% - 16px) 1px no-repeat; }
+table.results tbody tr:first-child td { padding-top: 10px; }
+table.results tbody tr:last-child td  { padding-bottom: 10px; }
+table.results tbody tr.group td { border-top: 10px solid transparent; }
+table.results tr.ours td, table.results tr.best td { color: var(--ocean); font-weight: 700; }
+table.results tr.ours td, table.results tr.focus td { background-color: var(--foam); }
+table.results tr.muted td { color: var(--slate); }
+table.results tbody td.grp { color: var(--deep); font-weight: 400; }
+table.results.compact { font-size: 18px; }
+table.results.compact th, table.results.compact td { padding-left: 10px; padding-right: 10px; }
+table.results.compact thead th { padding-top: 5px; padding-bottom: 4px; }
+table.results.compact thead tr:last-child th, table.results.compact thead th[rowspan] { padding-bottom: 5px; }
+table.results.compact tbody td { padding-top: 2px; padding-bottom: 2px; }
+table.results.compact tbody tr:first-child td { padding-top: 6px; }
+table.results.compact tbody tr:last-child td  { padding-bottom: 6px; }
+table.results.compact tbody tr.group td { border-top-width: 6px; }
 .table-note { margin-top: 18px; font-size: 19px; line-height: 1.45; color: var(--slate); }
 .table-note strong { color: var(--ink); }
 
