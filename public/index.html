@@ -93,12 +93,13 @@
           <em>“1: align with 2, make 3 smaller”</em>.</p>
         <p>Or edit yourself: click to select, drag to move, pull a handle to resize, arrow keys to nudge,
           double-click to change the text. A selected element is what Claude takes “this” to mean.</p>
-        <p>Add figures, audio or a screenshot with <strong>+</strong>, or drag and drop or paste a file; Claude can put it on a slide.</p>
+        <p>Add figures, audio, a PDF or a screenshot with <strong>+</strong>, or drag and drop or paste a file; Claude can put it on a slide
+          or, for a paper or report, take the details from it.</p>
         <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
           <code>brand.css</code> is locked.</p>
       </div>
     </div>
-    <div id="drop-hint" class="drop-hint" hidden><div>Drop figures or audio to attach them</div></div>
+    <div id="drop-hint" class="drop-hint" hidden><div>Drop figures, audio or PDFs to attach them</div></div>
     <div id="working" class="working" hidden><span class="spinner"></span> <span id="working-text">Claude is working…</span></div>
     <div class="composer">
       <div id="pin-tray" class="pin-tray"></div>
@@ -109,11 +110,11 @@
           <button id="add-btn" class="add-round" aria-haspopup="menu" aria-expanded="false" aria-label="Add to the message"
             title="Add a file or a screenshot to the message">+</button>
           <div id="add-menu" class="menu up" role="menu" hidden>
-            <button role="menuitem" data-add="file"><strong>File…</strong><span>A figure or audio file for Claude to put on a slide (or drop or paste it)</span></button>
+            <button role="menuitem" data-add="file"><strong>File…</strong><span>A figure, audio file or PDF (a figure, table, paper or report) for Claude to use (or drop or paste it)</span></button>
             <button role="menuitem" data-add="shot" id="add-shot"><strong>Screenshot</strong><span>This slide with its pins, for questions about how it looks</span></button>
           </div>
         </span>
-        <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg" hidden>
+        <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg,.pdf,application/pdf" hidden>
         <span class="spacer"></span>
         <button id="clear-pins" class="small" hidden>Clear pins</button>
         <button id="send" class="primary">Send</button>

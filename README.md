@@ -84,6 +84,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
+| Attach a PDF | The same way: a figure or table to take over, or a paper or report with more details. PDFs stay outside the deck (in `~/.pindeck`); Claude reads them, rebuilds tables as HTML, and renders a figure (a page or a cropped part of one) into `<deck>/figures/` as PNG with `cli.mjs pdf-figure` (macOS). E.g. "put Fig. 3 of this paper on slide 7" or "add the results of Table 2 to slide 9". |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
@@ -173,7 +174,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 | File | Purpose |
 |---|---|
 | `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
-| `cli.mjs` | `layout`, `shot`, `slides` and `pdf handout` / `pdf presentation` commands for Claude (and for you), and `git-setup`. |
+| `cli.mjs` | `layout`, `shot`, `slides`, `pdf handout` / `pdf presentation` and `pdf-figure` commands for Claude (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
 | `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
 | `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, tables, build steps, audio, layout, HTML in the deck's style. |
@@ -196,6 +197,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.7**: attach PDFs to chat messages (a figure, a table, a paper or report). They stay outside the deck; Claude reads
+  them, rebuilds tables as HTML and renders figures into `figures/` with `cli.mjs pdf-figure` (a page or a cropped part, macOS).
 * **2.6.1**: tinted table rows are one rectangle per row instead of one per cell, so PDF viewers show no hairline seams between the cells.
 * **2.6**: booktabs-style tables in both example decks (rules at top, under the header and at the bottom,
   short rules under grouped headings, numbers right-aligned); the import writes row groups without `rowspan`.

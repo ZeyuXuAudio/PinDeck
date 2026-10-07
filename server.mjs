@@ -7,9 +7,10 @@
    - pushes file changes to the browser (server-sent events) for live reload
    - runs one long-lived Claude Code process for the chat sidebar
    - snapshots files around every Claude turn for diffs and undo
-   - answers `cli.mjs layout|shot|slides|pdf` for Claude's self-checks and exports
+   - answers `cli.mjs layout|shot|slides|pdf|pdf-figure` for Claude's self-checks, exports and PDF figures
    - exports the deck as a PDF handout or a PDF presentation (build steps on separate pages)
-   - stores figures and audio attached to chat messages in <deck>/figures/ for Claude to use
+   - stores figures and audio attached to chat messages in <deck>/figures/ for Claude to use, and attached
+     PDFs (papers, reports, figures) in ~/.pindeck, outside the deck
    - imports slides from PowerPoint files in the deck's own layouts
    Listens on 127.0.0.1 only; every API call needs the per-run token.
    Runtime files (chat, screenshots, backups) live in ~/.pindeck, never in the deck or the package. */
@@ -27,7 +28,7 @@ import { ClaudeSession } from "./lib/claude.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
 import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs";
 import { readPptx } from "./lib/pptx.mjs";
-import { exportPdf as pptxToPdf, renderJobs, renderAvailable } from "./lib/pptx-render.mjs";
+import { exportPdf as pptxToPdf, renderJobs, renderAvailable, pdfInfo } from "./lib/pptx-render.mjs";
 import { buildImport, planSlides } from "./lib/pptx-import.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
@@ -50,6 +51,7 @@ const deckKey = path.basename(DECK_DIR).replace(/[^\w.-]+/g, "_") + "-" +
   crypto.createHash("sha1").update(DECK_DIR).digest("hex").slice(0, 8);
 const STATE_DIR = path.join(HOME_DIR, "decks", deckKey);
 const SHOT_DIR = path.join(STATE_DIR, "shots");
+const PDF_DIR = path.join(STATE_DIR, "attachments");   // attached PDFs: reading material, not part of the deck
 const TOKEN = crypto.randomBytes(16).toString("hex");
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const CLI_REL = path.relative(DECK_DIR, path.join(EDITOR_DIR, "cli.mjs")).split(path.sep).join("/");
@@ -254,6 +256,7 @@ const state = {
   chat: [], seq: 0, busy: false, model: MODEL || null, sessionId: null,
   turns: [], redo: [], turn: null, notes: [], pins: [], current: null,
   uploads: new Set(),   // files uploaded for the next message; removable until it is sent
+  pdfFigures: new Set(),   // figures/ files written by pdf-figure, which it may overwrite
 };
 try {
   const saved = JSON.parse(fs.readFileSync(CHAT_FILE, "utf8"));
@@ -330,7 +333,12 @@ function ensureSession() {
 }
 
 function toolSummary(name, input = {}) {
-  const base = (p) => (p ? path.relative(DECK_DIR, p) || path.basename(p) : "");
+  // files outside the deck (screenshots, attached PDFs) by their name only
+  const base = (p) => {
+    if (!p) return "";
+    const r = path.relative(DECK_DIR, p);
+    return !r || r.startsWith("..") ? path.basename(p) : r;
+  };
   switch (name) {
     case "Read": return { name: "Read", detail: base(input.file_path) };
     case "Edit": case "MultiEdit": case "Write": return { name: "Edit", detail: base(input.file_path) };
@@ -338,8 +346,9 @@ function toolSummary(name, input = {}) {
       // a PinDeck command only when the whole command is one: a script that ends in `cli.mjs layout`
       // must show as the script, or a refused script looks like a refused layout check
       const cmd = String(input.command || "").trim();
-      const m = cmd.startsWith(CLI_CMD + " ") && cmd.slice(CLI_CMD.length).match(/^\s+(\w+)\s*([^\n;&|<>`$]*)$/);
-      return m ? { name: m[1] === "shot" ? "Screenshot" : m[1] === "layout" ? "Check layout" : m[1], detail: m[2].trim() }
+      const m = cmd.startsWith(CLI_CMD + " ") && cmd.slice(CLI_CMD.length).match(/^\s+([\w-]+)\s*([^\n;&|<>`$]*)$/);
+      const names = { shot: "Screenshot", layout: "Check layout", "pdf-figure": "PDF figure" };
+      return m ? { name: names[m[1]] || m[1], detail: m[1] === "pdf-figure" ? m[2].trim().replace(/^\S*\//, "") : m[2].trim() }
                : { name: "Run", detail: cmd.split("\n")[0].slice(0, 80) };
     }
     case "Glob": case "Grep": return { name, detail: input.pattern || "" };
@@ -417,27 +426,36 @@ function finishTurn({ error, cost, duration, denials = [] }) {
   pushStatus();
 }
 
-/* ---- Attachments: figures and audio added to a chat message -------------------------------------- */
+/* ---- Attachments: figures, audio and PDFs added to a chat message ------------------------------------
+   Figures and audio go into <deck>/figures/ (paths relative to the deck). PDFs are reading material for
+   Claude (a paper, a report, a figure or table to take over) and stay outside the deck, in PDF_DIR
+   (absolute paths); `cli.mjs pdf-figure` renders a page or part of one into figures/ when it is needed. */
 const ATTACH_TYPES = {
   image: ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"],
   audio: ["wav", "mp3", "ogg", "oga", "m4a", "aac", "flac", "opus"],
+  pdf: ["pdf"],
 };
+const uploadFile = (p) => (path.isAbsolute(p) ? p : path.join(DECK_DIR, p));
 const ATTACH_MAX = 100 * 1024 * 1024;
 const attachKind = (name) => {
   const ext = path.extname(name).slice(1).toLowerCase();
   return Object.keys(ATTACH_TYPES).find((k) => ATTACH_TYPES[k].includes(ext)) || null;
 };
-/* A clean, unused file name in figures/: "My Figure (2).PNG" -> "figures/my-figure-2.png" */
-function attachPath(original) {
+/* A clean, unused file name in figures/ (or in dir): "My Figure (2).PNG" -> "figures/my-figure-2.png" */
+const slug = (name) => name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "file";
+function attachPath(original, dir = "figures") {
   const ext = path.extname(original).toLowerCase();
-  const base = path.basename(original, path.extname(original)).normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "file";
-  let rel = `figures/${base}${ext}`, k = 2;
-  while (fs.existsSync(path.join(DECK_DIR, rel))) rel = `figures/${base}-${k++}${ext}`;
+  const base = slug(path.basename(original, path.extname(original)));
+  let rel = `${dir}/${base}${ext}`, k = 2;
+  while (fs.existsSync(uploadFile(rel))) rel = `${dir}/${base}-${k++}${ext}`;
   return rel;
 }
 const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
 function formatAttachment(a) {
+  if (a.kind === "pdf")
+    return `- ${a.path}: PDF, ${a.pages ? `${a.pages} page${a.pages > 1 ? "s" : ""}${a.pageSize ? ` (${a.pageSize[0]} × ${a.pageSize[1]} pt)` : ""}, ` : ""}${kb(a.bytes)}. ` +
+      `Read it directly${a.pages > 10 ? ' with pages (e.g. "1-5"), at most 20 per Read' : ""}; for a figure or table from it, see "Attached PDFs".`;
   if (a.kind === "image")
     return `- ${a.path}: image${a.width ? `, ${a.width} × ${a.height} px` : ""}, ${kb(a.bytes)}` +
       (/\.(png|jpe?g|gif|webp)$/i.test(a.path) ? ". Read it directly to see it (no resizing needed)." : a.path.endsWith(".svg") ? " (SVG, readable as text)." : ".");
@@ -465,6 +483,41 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
   if (attachments.length) ctx.push("Attached files (the user added them to this message; they are saved in the deck folder, " +
     "use these paths relative to index.html):\n" + attachments.map((a) => formatAttachment(a) + formatDrop(a)).join("\n"));
   return (ctx.length ? `<editor-context>\n${ctx.join("\n\n")}\n</editor-context>\n\n` : "") + userText;
+}
+
+/* `cli.mjs pdf-figure <pdf> <page> [x,y,w,h] [figures/name.png] [--width px]`: renders a PDF page, or a box
+   of it given as fractions of the page from the top left, to PNG. Without a figures/ name it goes to the
+   screenshots folder, for Claude to look at before choosing; with one, into the deck. */
+async function pdfFigure({ file = "", page = "1", box = "", out = "", width = "" }) {
+  const bad = (t, status = 400) => ({ status, text: t });
+  if (process.platform !== "darwin") return bad("Rendering PDF pages needs macOS (PDFKit).", 501);
+  const abs = [path.isAbsolute(file) ? file : path.join(DECK_DIR, file), path.join(PDF_DIR, path.basename(file))]
+    .map((f) => path.resolve(f)).find((f) => /\.pdf$/i.test(f) && fs.existsSync(f) &&
+      [DECK_DIR, PDF_DIR].some((d) => f.startsWith(d + path.sep)));
+  if (!abs) return bad(`No PDF "${file}": use the path from the attached files, or a .pdf in the deck folder.`, 404);
+  const info = await pdfInfo(abs, STATE_DIR);
+  const n = Number(page);
+  if (!(Number.isInteger(n) && n >= 1 && n <= info.pages)) return bad(`No page ${page}: the PDF has ${info.pages} page${info.pages > 1 ? "s" : ""}.`);
+  const f = box ? box.split(",").map(Number) : [0, 0, 1, 1];
+  if (f.length !== 4 || f.some((v) => !(v >= 0 && v <= 1)) || !f[2] || !f[3] || f[0] + f[2] > 1.001 || f[1] + f[3] > 1.001)
+    return bad("The box is x,y,w,h as fractions of the page (0 to 1, from the top left), e.g. 0.1,0.25,0.8,0.3.");
+  const [pw, ph] = info.sizes[n - 1];
+  const pts = [f[0] * pw, f[1] * ph, Math.min(f[2], 1 - f[0]) * pw, Math.min(f[3], 1 - f[1]) * ph];
+  const scale = Math.min(8, Math.max(100, Math.min(4000, Number(width) || 1600)) / pts[2]);   // output px per point
+  if (out && !/^figures\/[a-z0-9][a-z0-9._-]*\.png$/i.test(out)) return bad("The output is a PNG in figures/, e.g. figures/paper-fig3.png.");
+  if (out && fs.existsSync(path.join(DECK_DIR, out)) && !state.pdfFigures.has(out)) return bad(`${out} exists already; choose another name.`, 409);
+  const tmp = path.join(SHOT_DIR, `pdf-${slug(path.basename(abs, ".pdf"))}-p${n}-${Date.now()}.png`);
+  await renderJobs(abs, [{ page: n, out: tmp, box: pts, scale }], STATE_DIR, { slideWidth: pw });
+  if (!fs.existsSync(tmp)) return bad("PDFKit did not write the picture.", 500);
+  const size = `${Math.round(pts[2] * scale)} × ${Math.round(pts[3] * scale)} px`;
+  if (!out) return { text: `${tmp} (${size}). Read it; add a figures/ name to save it into the deck.` };
+  const buf = fs.readFileSync(tmp);
+  fs.rmSync(tmp, { force: true });
+  fs.mkdirSync(path.join(DECK_DIR, "figures"), { recursive: true });
+  ourWrites.set(out, { hash: hash(buf.toString("utf8")), manual: true });   // no slide reload for a new file
+  fs.writeFileSync(path.join(DECK_DIR, out), buf);
+  state.pdfFigures.add(out);
+  return { text: `${out} (${size})` };
 }
 
 /* ---- File watching -------------------------------------------------------------------------- */
@@ -748,7 +801,7 @@ const server = http.createServer(async (req, res) => {
       }
       const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
       // only files PinDeck itself stored can be attached
-      b.attachments = (b.attachments || []).filter((a) => a && state.uploads.has(a.path) && fs.existsSync(path.join(DECK_DIR, a.path)));
+      b.attachments = (b.attachments || []).filter((a) => a && state.uploads.has(a.path) && fs.existsSync(uploadFile(a.path)));
       b.attachments.forEach((a) => { state.uploads.delete(a.path); if (a.waveform) state.uploads.delete(a.waveform); });
       const entry = addEntry({ kind: "user", text: b.text, screenshot: !!screenshot,
         attachments: b.attachments.map((a) => ({ path: a.path, kind: a.kind, name: a.name })),
@@ -760,7 +813,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/upload" && req.method === "POST") {
       const original = decodeURIComponent(String(req.headers["x-filename"] || "file"));
       const kind = attachKind(original);
-      if (!kind) return json(res, 415, { error: `Only images (${ATTACH_TYPES.image.join(", ")}) and audio (${ATTACH_TYPES.audio.join(", ")}) can be attached.` });
+      if (!kind) return json(res, 415, { error: `Only images (${ATTACH_TYPES.image.join(", ")}), audio (${ATTACH_TYPES.audio.join(", ")}) and PDFs can be attached.` });
       const chunks = [];
       let size = 0;
       for await (const c of req) {
@@ -769,6 +822,16 @@ const server = http.createServer(async (req, res) => {
         chunks.push(c);
       }
       const buf = Buffer.concat(chunks);
+      if (kind === "pdf") {
+        if (buf.subarray(0, 5).toString() !== "%PDF-") return json(res, 415, { error: `${original} is not a PDF.` });
+        fs.mkdirSync(PDF_DIR, { recursive: true });
+        const abs = attachPath(original, PDF_DIR);
+        fs.writeFileSync(abs, buf);
+        state.uploads.add(abs);
+        let info = null;
+        if (process.platform === "darwin") { try { info = await pdfInfo(abs, STATE_DIR); } catch {} }
+        return json(res, 200, { path: abs, kind, bytes: buf.length, pages: info?.pages, pageSize: info?.sizes[0] });
+      }
       const rel = attachPath(original);
       fs.mkdirSync(path.join(DECK_DIR, "figures"), { recursive: true });
       ourWrites.set(rel, { hash: hash(buf.toString("utf8")), manual: true });   // no slide reload for a new file
@@ -781,7 +844,7 @@ const server = http.createServer(async (req, res) => {
       for (const rel of [b.path, b.waveform].filter(Boolean)) {
         if (!state.uploads.has(rel)) continue;   // only unsent uploads, never other deck files
         state.uploads.delete(rel);
-        fs.rmSync(path.join(DECK_DIR, rel), { force: true });
+        fs.rmSync(uploadFile(rel), { force: true });
       }
       return json(res, 200, {});
     }
@@ -1037,6 +1100,10 @@ const server = http.createServer(async (req, res) => {
       if (!["handout", "presentation"].includes(kind)) return text(res, 400, 'Use "handout" or "presentation".');
       const r = await exportPdf(kind, url.searchParams.get("all") === "1");
       return text(res, 200, r.path);
+    }
+    if (p === "/api/pdf-figure") {
+      const r = await pdfFigure(Object.fromEntries(url.searchParams));
+      return text(res, r.status || 200, r.text);
     }
     if (p === "/api/slides") {
       return text(res, 200, slideList().map((s) => `${String(s.index + 1).padStart(2)}  ${s.eid}`).join("\n"));

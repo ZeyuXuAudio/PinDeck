@@ -8,6 +8,10 @@
    node cli.mjs pdf handout         PDF with one page per slide (build steps in their final state)
    node cli.mjs pdf presentation    PDF with one page per build step
                                     (add "all" to include hidden slides: pdf handout all)
+   node cli.mjs pdf-figure <pdf> <page> [x,y,w,h] [figures/name.png] [--width 1600]
+                                    a page of an attached PDF, or a box of it (fractions of the page
+                                    from the top left), as PNG: without a name in the screenshots
+                                    folder to look at, with one saved into the deck
 
    node cli.mjs git-setup [deck]    keep PinDeck's data-eid ids out of git (no server needed)
 
@@ -46,9 +50,17 @@ if (cmd === "git-setup") {
 }
 const issuesOnly = cmd === "layout" && rest.includes("--issues");
 const slides = rest.filter((a) => a !== "--issues");
-if (!["layout", "shot", "slides", "pdf"].includes(cmd)) {
-  console.error("Usage: node cli.mjs layout|shot <slide>... [--issues]  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation  |  node cli.mjs git-setup [deck]");
+if (!["layout", "shot", "slides", "pdf", "pdf-figure"].includes(cmd)) {
+  console.error("Usage: node cli.mjs layout|shot <slide>... [--issues]  |  node cli.mjs slides  |  node cli.mjs pdf handout|presentation  |  " +
+    "node cli.mjs pdf-figure <pdf> <page> [x,y,w,h] [figures/name.png] [--width px]  |  node cli.mjs git-setup [deck]");
   process.exit(2);
+}
+/* pdf-figure: the box and the output name are told apart by their form, so their order does not matter */
+function figureQuery(args) {
+  const w = args.indexOf("--width"), width = w >= 0 ? args.splice(w, 2)[1] : "";
+  const [file = "", page = "1", ...more] = args;
+  return { file: file && path.resolve(file), page, width,
+    box: more.find((a) => /^[\d.]+(,[\d.]+){3}$/.test(a)) || "", out: more.find((a) => /\.png$/i.test(a)) || "" };
 }
 
 let url = process.env.DECK_EDITOR_URL, token = process.env.DECK_EDITOR_TOKEN;
@@ -62,7 +74,8 @@ if (!url || !token) {
 if (!url) { console.error("The PinDeck server is not running (start it with: pindeck <deck-folder>)."); process.exit(1); }
 
 /* layout and shot take several slides, so Claude needs no shell loop or pipe (which PinDeck refuses) */
-const queries = cmd === "pdf" ? [{ slide: rest[0] || "handout", ...(rest[1] === "all" ? { all: "1" } : {}) }]
+const queries = cmd === "pdf-figure" ? [figureQuery([...rest])]
+  : cmd === "pdf" ? [{ slide: rest[0] || "handout", ...(rest[1] === "all" ? { all: "1" } : {}) }]
   : cmd === "slides" ? [{}] : (slides.length ? slides : ["current"]).map((slide) => ({ slide }));
 let ok = true;
 for (const q of queries) {

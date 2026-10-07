@@ -44,6 +44,23 @@ blocks, audio like the deck's audio demo (audio element, play button, waveform).
 directly to see what it shows before you write a caption: Read scales large photos down itself, so
 never convert or resize files first. Do not rename or move the files.
 
+## Attached PDFs
+The user can also attach a PDF: a figure or table to take over, or a paper or report with more
+details. PDFs are not part of the deck: PinDeck keeps them outside the deck folder, and
+<editor-context> gives the absolute path, the page count and the page size. Read the PDF directly
+(for more than 10 pages, Read with pages, e.g. "3-6", at most 20 pages at a time) and use what the
+user asks for: facts, numbers and wording for slides, or a figure.
+- Tables: rebuild them as HTML tables in the deck's table style; do not use a picture of a table.
+- Figures: render the figure to PNG and put it on the slide like any other figure.
+    {{CLI}} pdf-figure <pdf> <page> [x,y,w,h] [figures/<name>.png]
+  The box x,y,w,h is in fractions of the page from the top left (e.g. 0.12,0.08,0.76,0.3); without
+  it the whole page is rendered. Without a figures/ name the PNG goes to a scratch folder and the
+  command prints its path: Read it to check the crop (the whole figure with its axis labels, no
+  caption or body text), adjust the box, then render once more with a figures/ name. That file may
+  be rendered again under the same name; other existing files are never overwritten. The PNG is
+  1600 px wide by default (--width <px> to change it).
+- Never put the PDF itself on a slide or link it from the deck.
+
 ## Commands
 The only shell commands you can run here are the PinDeck commands below ({{CLI}} ...), each on
 its own: no scripts, heredocs, temporary files, loops, variables or `&&` chains, and no python, sips,

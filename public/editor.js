@@ -528,7 +528,7 @@ function entryHtml(e) {
         `<span class="chip sel" title="${esc(e.selection.eid)}"><span class="n">▢</span> S${e.selection.slide} · ${esc(e.selection.label)}</span>` : ""}${(e.pins || []).map((p) =>
         `<span class="chip" title="${esc(p.eid)}"><span class="n">${p.n}</span> S${p.slide} · ${esc(p.label || p.eid)}</span>`).join("")}${
         e.screenshot ? '<span class="chip">📷 screenshot</span>' : ""}${(e.attachments || []).map((a) =>
-        `<span class="chip att-chip" title="${esc(a.path)}">${a.kind === "image" ? `<img src="/deck/${esc(a.path)}" alt="">` : "🔊"} ${esc(a.path.split("/").pop())}</span>`).join("")}</div>` : ""}`;
+        `<span class="chip att-chip" title="${esc(a.path)}">${a.kind === "image" ? `<img src="/deck/${esc(a.path)}" alt="">` : a.kind === "pdf" ? "📄" : "🔊"} ${esc(a.path.split("/").pop())}</span>`).join("")}</div>` : ""}`;
     case "assistant": return md(e.text);
     case "tool":
       return `<span><span class="tn">${esc(e.name)}</span> ${esc(e.detail || "")}${e.error ? `<span class="err">${esc(e.error)}</span>` : ""}</span>`;
@@ -626,7 +626,8 @@ async function send() {
     const res = await api("message", {
       text, pins: state.pins, selection: state.sel, layouts, screenshot: state.shot || false,
       attachments: attachments.filter((a) => a.status === "ready").map(({ path, kind, name, bytes, width, height, duration,
-        sampleRate, channels, waveform, droppedAt }) => ({ path, kind, name, bytes, width, height, duration, sampleRate, channels, waveform, droppedAt })),
+        sampleRate, channels, waveform, pages, pageSize, droppedAt }) =>
+        ({ path, kind, name, bytes, width, height, duration, sampleRate, channels, waveform, pages, pageSize, droppedAt })),
       current: s ? { index: state.current, eid: s.eid } : null,
     });
     if (!res.ok) { alert((await res.json()).error || "Could not send."); return; }
@@ -938,14 +939,15 @@ async function requestDelete(eid) {
   }
 }
 
-/* ---- Attachments: figures and audio for the next message -------------------------------------------
-   Files are uploaded at once into <deck>/figures/. Images get their pixel size, audio its duration and a
+/* ---- Attachments: figures, audio and PDFs for the next message ----------------------------------------
+   Files are uploaded at once into <deck>/figures/ (PDFs, reading material for Claude, outside the deck). Images get their pixel size, audio its duration and a
    waveform SVG (bars, viewBox 1000 x 120, like the template's audio player), all computed here in the
    browser. Removing an attachment before sending deletes the uploaded file again. */
 let attachments = [], attachSeq = 0;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif)$/i, AUDIO_EXT = /\.(wav|mp3|ogg|oga|m4a|aac|flac|opus)$/i;
 const kindOf = (f) => (f.type.startsWith("image/") || IMAGE_EXT.test(f.name) ? "image"
-  : f.type.startsWith("audio/") || AUDIO_EXT.test(f.name) ? "audio" : null);
+  : f.type.startsWith("audio/") || AUDIO_EXT.test(f.name) ? "audio"
+  : f.type === "application/pdf" || /\.pdf$/i.test(f.name) ? "pdf" : null);
 const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
 
 async function uploadBlob(blob, name) {
@@ -991,7 +993,7 @@ async function audioInfo(file) {
 async function attachFile(file, droppedAt) {
   const name = file.name && file.name !== "image.png" ? file.name : `pasted-image-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
   const kind = kindOf({ type: file.type || "", name });
-  if (!kind) return toast(`${file.name || "This file"} is not an image or audio file.`);
+  if (!kind) return toast(`${file.name || "This file"} is not an image, audio file or PDF.`);
   const a = { id: ++attachSeq, name, kind, status: "uploading", bytes: file.size, droppedAt,
     preview: kind === "image" ? URL.createObjectURL(file) : null };
   attachments.push(a);
@@ -999,7 +1001,7 @@ async function attachFile(file, droppedAt) {
   try {
     let wave = null;
     if (kind === "image") Object.assign(a, await imageSize(file));
-    else { const info = await audioInfo(file); Object.assign(a, info.meta); wave = info.svg; }
+    else if (kind === "audio") { const info = await audioInfo(file); Object.assign(a, info.meta); wave = info.svg; }
     Object.assign(a, await uploadBlob(file, name));
     if (wave) {
       const w = await uploadBlob(new Blob([wave], { type: "image/svg+xml" }), a.path.split("/").pop().replace(/\.[^.]+$/, "") + "-wave.svg");
@@ -1034,9 +1036,10 @@ function renderAttachments() {
   $("attach-tray").innerHTML = shot + attachments.map((a) => {
     const info = a.status === "uploading" ? "uploading…" : a.status === "error" ? a.error
       : [a.kind === "image" && a.width ? `${a.width} × ${a.height}` : "", a.duration ? `${a.duration.toFixed(1)} s` : "",
+         a.pages ? `${a.pages} page${a.pages > 1 ? "s" : ""}` : "",
          fmtBytes(a.bytes), a.droppedAt ? `dropped on slide ${a.droppedAt.slide.index + 1}` : ""].filter(Boolean).join(" · ");
     return `<span class="att ${a.status}" title="${esc(a.path || a.name)}">
-      ${a.kind === "image" ? `<img class="thumb" src="${a.preview || "/deck/" + esc(a.path)}" alt="">` : '<span class="icon-box">🔊</span>'}
+      ${a.kind === "image" ? `<img class="thumb" src="${a.preview || "/deck/" + esc(a.path)}" alt="">` : `<span class="icon-box">${a.kind === "pdf" ? "📄" : "🔊"}</span>`}
       <span class="meta"><b>${esc(a.path ? a.path.split("/").pop() : a.name)}</b><span>${esc(info)}</span></span>
       ${a.status === "uploading" ? '<span class="spinner"></span>' : ""}
       <button class="x" data-unattach="${a.id}" aria-label="Remove ${esc(a.name)}">×</button></span>`;
