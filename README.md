@@ -36,6 +36,33 @@ numbers will jump where a slide is hidden.
 Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
 `brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
 
+## Making your own template
+
+PinDeck has no template generator; a template is simply a deck folder. Start from a copy of the example:
+
+```bash
+cp -R ocean-example my-template
+```
+
+1. **Brand in `brand.css`:** palette, backgrounds, footer and logo positions. PinDeck locks this file
+   for Claude, so edit it by hand (or with Claude Code outside PinDeck). Replace the logos in
+   `assets/` too.
+2. **Everything else in `theme.css`:** type sizes, spacing, layouts and components. This can be done
+   in PinDeck with Claude.
+3. **`index.html`:** the footer text in the `data-` attributes of `<div class="reveal">`, and the
+   `pindeck:footer-top` and `pindeck:locked` meta tags if the footer or the brand elements move.
+   `deck.js` holds the math macros, the footer markup and the audio player.
+4. **`README.md` and `CLAUDE.md`:** Claude follows both, so describe the new classes and rules there.
+   The example's `CLAUDE.md` calls `../cli.mjs` and `../server.mjs`; fix these paths if the template
+   does not sit next to PinDeck.
+
+**New slide** and the PowerPoint import model new slides on the deck's own: keep a slide with class
+`title-slide`, one with `section-slide`, and a content slide with `.slide-head` (`h2`, optionally a
+`.kicker` or `.sub`) and `.slide-body`. Imported tables take the class of the deck's first table,
+and imported audio copies the first `.demo-row` (with a `data-target`). Without a title or section
+slide, those PowerPoint slides are imported as content slides; without a `.demo-row`, audio gets
+plain players.
+
 ## Configuration
 
 `~/.pindeck/config.json` (or `$PINDECK_HOME/config.json`) is created on first start:
