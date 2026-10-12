@@ -54,7 +54,23 @@ Useful while developing:
   the README.
 * **Document what users see.** Update the README: the "Working with it" table for new actions, "Current
   Limitations" when one goes away, and a line for the "Versions" list in your pull request. The
-  maintainer assigns the version number.
+  maintainer assigns the version number (see below).
+
+## Versions
+
+PinDeck numbers its releases `major.minor.patch`:
+
+* **Minor** (2.7 → 2.8): anything users can do or notice that they could not before: a feature, a
+  command or CLI option, a setting, or a change in how something behaves. A release that mixes fixes
+  with even one such change is a minor release.
+* **Patch** (2.8 → 2.8.1): fixes and polish only; nothing new to learn.
+* **Major** (1.x → 2.0): a large new part of PinDeck (2.0 brought the PowerPoint import), or a change
+  that breaks existing decks or habits.
+
+Each release is one commit titled `PinDeck X.Y: what it brings` (or `X.Y.Z`), sets `"version"` in
+`package.json` to `X.Y.Z`, adds its line at the top of the README's "Versions" list, and gets an
+annotated tag `vX.Y.Z` with the message `PinDeck X.Y.Z`. Commits between releases (documentation, say)
+keep the version as it is.
 
 ## Testing
 
