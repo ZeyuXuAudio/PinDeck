@@ -804,6 +804,7 @@ $("import-file").addEventListener("change", async () => {
       <div class="cap"><span class="n">${s.n}</span><span class="t">${esc(s.title || s.subtitle || "Untitled")}${s.title && s.subtitle ? ` · ${esc(s.subtitle)}` : ""}</span>${s.hidden ? '<span class="tag">hidden</span>' : ""}${s.complex.length ? `<span class="tag complex" title="${esc("Only approximated: " + s.complex.join("; "))}">complex</span>` : ""}</div>
     </label></li>`).join("");
   updateImportButton();
+  $("import-dialog").returnValue = "";   // Esc keeps the old value: it must not be "import" from the last time
   $("import-dialog").showModal();
 });
 function importStatus(msg, error = false) {

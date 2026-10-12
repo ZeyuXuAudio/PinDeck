@@ -123,8 +123,8 @@ the files changed. CSS changes are swapped in without a reload.
 The import keeps what can be carried over exactly and makes pictures of the rest:
 
 * **Text becomes HTML** in the deck's layouts: the title (and the subtitle, as a `.sub` line or a
-  kicker, as the deck does it), bullets with their levels, bold, italics, coloured words (as `.hl`),
-  superscripts, links and line breaks, other text as paragraphs, references at the bottom of a slide
+  kicker, as the deck does it), bullets with their levels, numbered lists, bold, italics, coloured words (as `.hl`),
+  superscripts, web and mail links and line breaks, other text as paragraphs, references at the bottom of a slide
   as `.refs`, and the speaker notes. Side notes and labels clearly smaller than the body text stay smaller.
 * **Tables become HTML tables** with the class of the deck's own tables, merged header cells, header rows
   and a caption from the text above them. Cells merged down in the body become a label on the group's
@@ -224,6 +224,18 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.8**: a code review: safer, sturdier, and a PowerPoint import that keeps more. The server answers
+  only to `127.0.0.1` and `localhost`, so another website cannot read the editor's token (DNS
+  rebinding). A missing `claude` command ends the turn with a message instead of leaving the chat
+  working forever, and a replaced Claude Code process can no longer end the next turn. Esc in the import
+  dialog no longer repeats the last import, and an import never overwrites edits made while it runs. The
+  PowerPoint import keeps animations that play by themselves off the clicks, wraps shapes that come and
+  go in fragments of their own, skips hidden shapes and `javascript:` links, reads packages with
+  absolute part names, takes only the first line of a subtitle placeholder as the subtitle, keeps
+  equations in titles and notes, writes numbered lists as `<ol>`, keeps the text of coloured boxes
+  without PowerPoint or Keynote, and makes valid TeX of escaped text, equation arrays, odd delimiters
+  and primes after superscripts. Damaged WAV or XML parts no longer stop an import. The toolbar wraps
+  instead of overlapping when the slide area is narrow.
 * **2.7**: attach PDFs to chat messages (a figure, a table, a paper or report). They stay outside the deck; Claude reads
   them, rebuilds tables as HTML and renders figures into `figures/` with `cli.mjs pdf-figure` (a page or a cropped part, macOS).
 * **2.6.1**: tinted table rows are one rectangle per row instead of one per cell, so PDF viewers show no hairline seams between the cells.

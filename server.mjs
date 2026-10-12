@@ -323,8 +323,12 @@ const session = new ClaudeSession({
   ],
   onStderr: (s) => { stderrTail = (stderrTail + s).slice(-2000); },
   onEvent: handleEvent,
-  onExit: (code, signal) => {
-    if (state.busy) finishTurn({ error: `Claude Code stopped (${signal || "exit " + code}). ${stderrTail.trim().split("\n").pop() || ""}` });
+  onExit: (code, signal, { stale } = {}) => {
+    if (state.busy && state.turn && !stale) {
+      const why = code == null && signal == null ? "could not start" : `stopped (${signal || "exit " + code})`;
+      const hint = /ENOENT/.test(stderrTail) ? " Is the claude command installed and on the PATH (or set CLAUDE_BIN)?" : "";
+      finishTurn({ error: `Claude Code ${why}. ${stderrTail.trim().split("\n").pop() || ""}${hint}` });
+    }
     pushStatus();
   },
 });
@@ -401,8 +405,12 @@ function finishTurn({ error, cost, duration, denials = [] }) {
   const restored = [];
   for (const f of LOCKED) {
     const now = readDeck(f);
-    if (turn.before[f] != null && now !== turn.before[f]) { writeDeck(f, turn.before[f]); restored.push(f); }
+    if (now === turn.before[f]) continue;
+    if (turn.before[f] != null) writeDeck(f, turn.before[f]);
+    else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // a locked file that Claude created
+    restored.push(f);
   }
+  toolEntries.clear();
   const eid = runEidPass();
   const after = snapshot(EDITABLE);
   const files = EDITABLE.map((f) => {
@@ -590,7 +598,11 @@ function undo(res) {
   const t = liveTurns().at(-1);
   if (!t) return json(res, 409, { error: "Nothing to undo." });
   const edited = EDITABLE.some((f) => readDeck(f) !== t.after[f]);
-  for (const f of EDITABLE) if (t.before[f] != null && readDeck(f) !== t.before[f]) writeDeck(f, t.before[f]);
+  for (const f of EDITABLE) {
+    if (readDeck(f) === t.before[f]) continue;
+    if (t.before[f] != null) writeDeck(f, t.before[f]);
+    else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // the change created the file
+  }
   for (const { rel, data } of t.deletedFiles || []) {   // files deleted with an element come back too
     fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
     fs.writeFileSync(path.join(DECK_DIR, rel), data);
@@ -617,13 +629,13 @@ let lastImport = null;   // { id, name, dir, model, render: Promise<pdf path | n
 fs.rmSync(IMPORT_DIR, { recursive: true, force: true });
 
 function startImport(name, buf) {
+  const model = readPptx(buf);   // first: a file that cannot be read leaves the previous import as it was
   if (lastImport) fs.rm(lastImport.dir, { recursive: true, force: true }, () => {});
   const id = crypto.randomBytes(6).toString("hex");
   const dir = path.join(IMPORT_DIR, id);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "deck.pptx");
   fs.writeFileSync(file, buf);
-  const model = readPptx(buf);
   const imp = { id, name, dir, model, renderError: null };
   imp.render = !renderAvailable() ? Promise.resolve(null) : (async () => {
     try {
@@ -647,12 +659,15 @@ async function applyImport(imp, numbers, afterEid, refine = false) {
   const html0 = before[DECK_FILE];
   const slides = findSlides(parse(html0));
   if (!slides.length) throw new Error("The deck has no slides to add to.");
-  const afterIdx = Math.max(0, slides.findIndex((s) => s.attrs["data-eid"]?.value === afterEid));
-  const after = slides[afterIdx] ?? slides.at(-1);
+  const found = slides.findIndex((s) => s.attrs["data-eid"]?.value === afterEid);
+  const afterIdx = found < 0 ? slides.length - 1 : found;   // no such slide (any more): at the end
+  const after = slides[afterIdx];
   const css = (readDeck("theme.css") || "") + (readDeck("brand.css") || "");
   const prefix = path.basename(imp.name, path.extname(imp.name)).normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").split("-").slice(0, 3).join("-") || "import";
   const r = await buildImport({ model: imp.model, numbers, pdf, workDir: imp.dir, deckDir: DECK_DIR, deckHtml: html0, css, after: afterIdx, prefix });
+  // building takes a while (pictures are cut from the slides): a change made meanwhile must not be overwritten
+  if (EDITABLE.some((f) => readDeck(f) !== before[f])) throw new Error("The deck changed during the import. Import again.");
   // the new slides go after the current one, at its indentation
   const end = elementEnd(html0, after);
   const ls = html0.lastIndexOf("\n", after.start - 1) + 1;
@@ -721,7 +736,7 @@ async function refineImport(imp, pdf, plans, eids, first) {
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
-
+const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 
 function serveFile(res, file, transform) {
   fs.readFile(file, (err, data) => {
@@ -733,6 +748,9 @@ function serveFile(res, file, transform) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // only pages opened as 127.0.0.1 or localhost: another site's name pointed at 127.0.0.1 (DNS rebinding)
+  // must not read the editor page, its token or the deck
+  if (!HOSTS.has(String(req.headers.host || "").toLowerCase())) return text(res, 403, "Bad host");
   const url = new URL(req.url, ORIGIN);
   const p = url.pathname;
   try {
@@ -792,7 +810,13 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/message" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is still working." });
       const b = await body(req);
-      if (!b.text?.trim()) return json(res, 400, { error: "Empty message." });
+      if (typeof b.text !== "string" || !b.text.trim()) return json(res, 400, { error: "Empty message." });
+      // what the prompt reads from pins and the selection must be there
+      const placed = (x) => x && typeof x.eid === "string" && x.slide && Number.isInteger(x.slide.index) && x.box;
+      b.pins = (Array.isArray(b.pins) ? b.pins : []).filter((p) => placed(p) && p.point && p.at);
+      if (!placed(b.selection)) b.selection = null;
+      if (!Array.isArray(b.layouts)) b.layouts = [];
+      if (b.current && !Number.isInteger(b.current.index)) b.current = null;
       let screenshot = null;
       const shotSlide = typeof b.screenshot === "object" && b.screenshot?.eid ? b.screenshot : b.screenshot ? b.current : null;
       if (shotSlide) {
@@ -919,7 +943,7 @@ const server = http.createServer(async (req, res) => {
       try { imp = startImport(name, Buffer.concat(chunks)); }
       catch (e) { return json(res, 400, { error: `${name} could not be read: ${e.message}` }); }
       // what the import can only approximate, so the dialog can offer Claude's help with it
-      const complex = new Map(planSlides(imp.model, imp.model.slides.map((s) => s.n)).map((p) => [p.n, p.complex]));
+      const complex = new Map(planSlides(imp.model, imp.model.slides.map((s) => s.n), { drawings: renderAvailable() }).map((p) => [p.n, p.complex]));
       return json(res, 200, { id: imp.id, name, render: renderAvailable(),
         slides: imp.model.slides.map((s) => ({ n: s.n, title: s.title, subtitle: s.subtitle, hidden: s.hidden, kind: s.kind, complex: complex.get(s.n) || [] })) });
     }
@@ -1118,8 +1142,10 @@ const server = http.createServer(async (req, res) => {
     }
     return text(res, 404, "Not found");
   } catch (e) {
-    console.error(e);
-    if (!res.headersSent) text(res, 500, String(e.message || e));
+    // malformed JSON or %-encoding in a request is the caller's mistake, not a server error
+    const bad = e instanceof SyntaxError || e instanceof URIError || e.message === "body too large";
+    if (!bad) console.error(e);
+    if (!res.headersSent) text(res, bad ? 400 : 500, String(e.message || e));
   }
 });
 

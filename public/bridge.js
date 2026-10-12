@@ -92,7 +92,7 @@
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         const p = n.parentElement;
-        if (!p || p.closest(".katex-mathml, .__pin, .__hover, .__flash, aside.notes, script, style")) return NodeFilter.FILTER_REJECT;
+        if (!p || p.closest(".katex-mathml, .__pin, .__hover, .__flash, .__sel, .__guide, .__edit-hint, .__hidden-banner, aside.notes, script, style")) return NodeFilter.FILTER_REJECT;
         if (ownOnly) { const owner = p.closest("[data-eid]"); if (owner !== el) return NodeFilter.FILTER_REJECT; }
         return NodeFilter.FILTER_ACCEPT;
       },
