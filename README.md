@@ -4,20 +4,42 @@
 the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
 pin them, write what to change, and Claude edits the HTML and CSS. The slide updates in place.
 
-It is built for reveal.js decks; `ocean-example/` is a complete example deck.
+![PinDeck: the slide list, slide 10 of the example deck with two numbered pins, and the chat with Claude's answer to an earlier request and a new one being typed](docs/pindeck.png)
+
+*The example deck in PinDeck. Claude has lined up the three numbers from the first request and
+checked the layout; the next request, still being typed, refers to the new pins 1 and 2.*
+
+## What it does
+
+* **Point instead of describe.** Pins name the exact element, word or table cell; "make 2 match 1"
+  is enough. Claude also gets the measured layout of the slide, so it sees overlaps and overflow
+  without screenshots.
+* **Edit by hand, too.** Move, resize and nudge elements with snapping, edit text in place (math stays
+  TeX), write speaker notes, add, hide, move and delete slides. One undo history covers your edits and
+  Claude's.
+* **Stay on brand.** `brand.css` is locked: Claude edits `index.html` and `theme.css` only, and checks
+  its own work with PinDeck's layout command.
+* **Bring material in.** Attach figures, audio and PDFs to a message, or import slides from PowerPoint
+  into the deck's own layouts.
+* **Get it out.** Present from the browser, or export a handout or presentation PDF.
+* **Local and small.** One Node process on 127.0.0.1, no npm dependencies, your normal Claude login.
+
+## Quick start
 
 ```bash
+git clone <this repository> && cd pindeck
+node server.mjs ocean-example   # the example deck in this repository
 npx pindeck path/to/deck        # once published on npm
-node server.mjs ocean-example   # from this repository
 ```
 
 Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `claude` CLI, signed in
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
-screenshots. PinDeck has no npm dependencies.
+screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import.
 
-Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in `~/.pindeck/config.json`), `--help`. The deck
-folder defaults to the current folder and must contain `index.html`. Runtime files (chat history,
-screenshots, backups) are kept in `~/.pindeck/` (change with `PINDECK_HOME`), not in the deck.
+Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
+`~/.pindeck/config.json`), `--help`. The deck folder defaults to the current folder and must contain
+`index.html`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck/` (change with
+`PINDECK_HOME`), not in the deck. `ocean-example/` is a complete example deck to start from.
 
 ## Preparing a deck
 
@@ -212,6 +234,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
 | `lib/claude.mjs` | The long-running Claude Code process. |
 | `lib/system-prompt.md` | What Claude is told about the editor. |
+| `CONTRIBUTING.md` | How to report bugs and contribute. |
+| `docs/` | Images for this README. |
 | `LICENSE` | MIT. |
 
 ## Current Limitations
@@ -278,6 +302,13 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **1.2**: text editing on the slide (double-click or Enter), with math as TeX, table cells, bold and italic, plain-text paste; text edits are part of the undo history and reported to Claude.
 * **1.1**: select, drag, resize and nudge with snapping guides; one undo/redo history for hand edits and Claude's changes; the selected element is sent to Claude.
 * **1.0**: pins, chat with Claude Code, layout reports, element ids, diff and undo.
+
+## Contributing
+
+Bug reports, ideas, example decks and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+explains how to report a bug, set up PinDeck for development, test a change by hand, and what a pull
+request should contain. In short: no npm dependencies, deck files are edited only where they must
+change, Claude's permissions stay narrow, and the README describes what users see.
 
 ## License
 

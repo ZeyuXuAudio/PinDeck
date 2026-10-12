@@ -164,7 +164,7 @@ table.results.compact tr.group > td:first-child::before { top: 6px; }
 .where dd { margin: 0 0 .35em 3.4em; }
 
 /* ---- Key numbers: gradient figures ---------------------------------------------------- */
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); height: 100%; align-items: center; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); height: 100%; align-content: center; align-items: start; }
 .stat { padding: 0 34px; border-left: 1px solid var(--line); }
 .stat:first-child { padding-left: 0; border-left: 0; }
 .stat .num { font-size: 96px; line-height: 1; font-weight: 700; letter-spacing: -0.03em;
