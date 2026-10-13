@@ -72,6 +72,10 @@ Each release is one commit titled `PinDeck X.Y: what it brings` (or `X.Y.Z`), se
 annotated tag `vX.Y.Z` with the message `PinDeck X.Y.Z`. Commits between releases (documentation, say)
 keep the version as it is.
 
+`git push --follow-tags` pushes the release and its tag; the tag starts a GitHub Actions workflow that
+stages the version on npm. It goes live once a maintainer approves it with 2FA, on npmjs.com or with
+`npm stage approve pindeck@X.Y.Z`.
+
 ## Testing
 
 There is no automated test suite yet, so please check your change by hand before you open a pull request:

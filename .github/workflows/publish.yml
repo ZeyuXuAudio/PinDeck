@@ -1,6 +1,7 @@
-# Publishes to npm when a release tag (vX.Y.Z) is pushed. Uses npm trusted publishing (OIDC):
-# no npm token is stored on GitHub, and every version gets a provenance attestation.
-name: Publish to npm
+# Stages a release on npm when a release tag (vX.Y.Z) is pushed. Uses npm trusted publishing (OIDC),
+# so no npm token is stored on GitHub. The version goes live only after a maintainer approves it
+# with 2FA: on npmjs.com, or `npm stage approve pindeck@X.Y.Z`.
+name: Stage on npm
 
 on:
   push:
@@ -17,10 +18,12 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24          # ships npm 11, which trusted publishing needs
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: npm 11.15 or later (for npm stage publish)
+        run: npm install -g npm@latest
       - name: Tag matches package.json
         run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
       - name: Syntax check
         run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
-      - run: npm publish
+      - run: npm stage publish
