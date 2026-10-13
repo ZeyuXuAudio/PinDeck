@@ -13,6 +13,12 @@
   ],
   "license": "MIT",
   "author": "Emanuël A. P. Habets",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ehabets/PinDeck.git"
+  },
+  "homepage": "https://github.com/ehabets/PinDeck#readme",
+  "bugs": "https://github.com/ehabets/PinDeck/issues",
   "type": "module",
   "bin": {
     "pindeck": "server.mjs"

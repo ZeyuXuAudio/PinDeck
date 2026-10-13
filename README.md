@@ -27,9 +27,10 @@ checked the layout; the next request, still being typed, refers to the new pins 
 ## Quick start
 
 ```bash
-git clone <this repository> && cd pindeck
-node server.mjs ocean-example   # the example deck in this repository
-npx pindeck path/to/deck        # once published on npm
+npx pindeck path/to/deck        # from npm
+
+git clone https://github.com/ehabets/PinDeck.git && cd PinDeck
+node server.mjs ocean-example   # or from source, with the example deck in this repository
 ```
 
 Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `claude` CLI, signed in

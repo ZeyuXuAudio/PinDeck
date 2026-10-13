@@ -24,8 +24,8 @@ the code saves work on both sides.
 ## Setting up
 
 ```bash
-git clone <this repository>
-cd pindeck
+git clone https://github.com/ehabets/PinDeck.git
+cd PinDeck
 node cli.mjs git-setup ocean-example   # keep PinDeck's data-eid ids out of your commits
 node server.mjs ocean-example          # then open http://127.0.0.1:5180/
 ```

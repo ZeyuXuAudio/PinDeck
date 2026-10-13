@@ -1,0 +1,26 @@
+# Publishes to npm when a release tag (vX.Y.Z) is pushed. Uses npm trusted publishing (OIDC):
+# no npm token is stored on GitHub, and every version gets a provenance attestation.
+name: Publish to npm
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write   # lets npm verify that this workflow did the publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24          # ships npm 11, which trusted publishing needs
+          registry-url: https://registry.npmjs.org
+      - name: Tag matches package.json
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      - name: Syntax check
+        run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
+      - run: npm publish
