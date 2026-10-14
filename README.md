@@ -249,6 +249,12 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.8.1**: fixes from a review. Speaker notes that fail to load leave the field empty and locked, instead
+  of showing the previous slide's notes and saving your edits over them. A save that fails because the
+  server cannot be reached is reported, and the edits after it (drags, text, bullets, notes) are still
+  saved instead of being dropped without a word. Stop no longer ends a turn started after it. Slides in
+  vertical stacks keep their order and ids, and a slide moved to the end goes after a final stack.
+  A first automated test suite (`npm test`).
 * **2.8**: a code review: safer, sturdier, and a PowerPoint import that keeps more. The server answers
   only to `127.0.0.1` and `localhost`, so another website cannot read the editor's token (DNS
   rebinding). A missing `claude` command ends the turn with a message instead of leaving the chat

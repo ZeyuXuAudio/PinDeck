@@ -100,28 +100,28 @@ window.__editorHost = {
     return d.html;
   },
   commitText(edit) {
-    editChain = editChain.then(async () => {
+    queueEdit(async () => {
       const res = await api("text", edit);
       if (!res.ok) toast((await res.json().catch(() => ({}))).error || "Could not save the text.");
       loadMain();   // re-render: math, footer numbers, and the file as saved
-    });
+    }, "Could not save the text.");
   },
   commitSplit(op, done) {
-    editChain = editChain.then(async () => {
+    queueEdit(async () => {
       const res = await api("split", op);
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { toast(d.error || "Could not add the bullet."); loadMain(); return; }
       done?.(d.eid);
-    });
+    }, "Could not add the bullet.");
   },
   commitRemove(eid) {
-    editChain = editChain.then(async () => {
+    queueEdit(async () => {
       const res = await api("remove", { eid });
       if (!res.ok) toast((await res.json().catch(() => ({}))).error || "Could not remove the bullet.");
       loadMain();
-    });
+    }, "Could not remove the bullet.");
   },
-  refresh() { editChain = editChain.then(() => loadMain()); },
+  refresh() { queueEdit(() => loadMain(), "Could not reload the slide."); },
   editingChanged(on) { state.editing = on; },
   requestDelete(eid) { requestDelete(eid); },
   dropFiles(files, at) { attachFiles(files, at); },
@@ -131,15 +131,20 @@ window.__editorHost = {
 
 /* ---- Hand edits (drag, resize, nudge) ---------------------------------------------------------- */
 let editChain = Promise.resolve(), nudgeAcc = null, nudgeTimer = null;
+// Saves run one after another. An edit that throws (offline, server gone) is reported and the queue
+// carries on, so one failure never silently skips the edits after it.
+function queueEdit(fn, failMsg = "Could not save the change.") {
+  editChain = editChain.catch(() => {}).then(fn).catch(() => { toast(failMsg); });
+  return editChain;
+}
 function postEdit(op, label) {
-  editChain = editChain.then(async () => {
+  return queueEdit(async () => {
     const res = await api("edit", { ops: [op], label });
     if (!res.ok) {
       toast((await res.json().catch(() => ({}))).error || "Could not save the change.");
       loadMain();   // show the file as it is
     }
   });
-  return editChain;
 }
 function flushNudge() {
   clearTimeout(nudgeTimer);
@@ -285,29 +290,47 @@ async function loadNotes() {
   if (!eid || document.activeElement === notesBox) return;
   const seq = ++notesSeq;
   await editChain.catch(() => {});   // a save still on its way would otherwise be read back as the old text
-  if (seq !== notesSeq) return;
+  if (seq !== notesSeq || notesDirty()) return;
   const res = await api(`notes?${new URLSearchParams({ eid })}`).catch(() => null);
   const d = res?.ok ? await res.json().catch(() => null) : null;
-  if (seq !== notesSeq || document.activeElement === notesBox) return;   // a newer load, or the user started typing
-  notes = { eid, text: d?.text || "", html: !!d?.html };
+  if (seq !== notesSeq || document.activeElement === notesBox || notesDirty()) return;
+  if (!d) {   // detach from the previous slide, so its notes are not shown, or saved over, as this one's
+    notes = { eid: null, text: "", html: false };
+    notesBox.value = "";
+    notesBox.disabled = true;
+    return notesStatus("Could not load");
+  }
+  notes = { eid, text: d.text || "", html: !!d.html };
   notesBox.value = notes.text;
+  notesBox.disabled = false;
   notesStatus();
 }
 function saveNotes() {
-  if (!notesDirty()) return;
+  if (!notesDirty()) return Promise.resolve(true);
   const edit = { eid: notes.eid, text: notesBox.value, html: notes.html };
   flushNudge();
-  editChain = editChain.then(async () => {
+  const run = async () => {
     notesStatus("Saving…");
-    const res = await api("notes", edit);
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) { notesStatus(); return toast(d.error || "Could not save the notes."); }   // the text stays, to save again
+    let res, d;
+    try {
+      res = await api("notes", edit);
+      d = await res.json().catch(() => ({}));
+    } catch {}   // a network failure must not break the shared edit queue
+    if (!res?.ok) {
+      notesStatus("Not saved");
+      toast(d?.error || "Could not save the notes.");
+      return false;
+    }
     if (notes.eid === edit.eid) notes.text = edit.text;
     notesStatus("Saved");
     setTimeout(() => { if ($("notes-status").textContent === "Saved") notesStatus(); }, 1500);
-  });
+    return true;
+  };
+  return queueEdit(run, "Could not save the notes.");
 }
-notesBox.addEventListener("blur", () => { saveNotes(); loadNotes(); });   // then show the slide we are on now
+notesBox.addEventListener("blur", async () => {
+  if (await saveNotes()) loadNotes();   // retain a failed draft and its original slide id for retry
+});
 notesBox.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); notesBox.blur(); }
   else if (e.key === "Escape") { e.preventDefault(); notesBox.value = notes.text; notesBox.blur(); }

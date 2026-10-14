@@ -78,7 +78,8 @@ stages the version on npm. It goes live once a maintainer approves it with 2FA, 
 
 ## Testing
 
-There is no automated test suite yet, so please check your change by hand before you open a pull request:
+Run `npm test` (Node's built-in test runner, `test/*.test.mjs`); it needs neither Claude nor a browser.
+Then check your change by hand before you open a pull request:
 
 1. `node --check` on the files you changed.
 2. Run PinDeck on `ocean-example/` and, if you have one, a deck of your own (copies, if your change
@@ -91,8 +92,8 @@ There is no automated test suite yet, so please check your change by hand before
    * import slides from a PowerPoint file, if you changed `lib/pptx*.mjs`, `lib/omml.mjs` or `lib/zip.mjs`.
 3. Check that the deck file changed only where it should (`git diff` with the git filter set up).
 
-Tests that run without Claude or a browser, for example for `lib/eids.mjs` or the PowerPoint import,
-are a very welcome contribution in themselves.
+More tests that run without Claude or a browser, for example for `lib/eids.mjs` or the PowerPoint
+import, are a very welcome contribution in themselves.
 
 ## Pull requests
 

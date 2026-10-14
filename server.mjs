@@ -964,8 +964,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/stop" && req.method === "POST") {
       if (state.busy && session.running) {
+        const interruptedTurn = state.turn;
         session.interrupt();
-        setTimeout(() => { if (state.busy) { session.stop(); } }, 5000); // force if it does not answer
+        setTimeout(() => {
+          if (state.busy && state.turn === interruptedTurn) session.stop();
+        }, 5000); // force only if the interrupted turn does not answer
       }
       return json(res, 200, {});
     }
