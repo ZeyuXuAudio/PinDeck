@@ -1,6 +1,6 @@
 # Stages a release on npm when a release tag (vX.Y.Z) is pushed. Uses npm trusted publishing (OIDC),
 # so no npm token is stored on GitHub. The version goes live only after a maintainer approves it
-# with 2FA: on npmjs.com, or `npm stage approve pindeck@X.Y.Z`.
+# with 2FA: on npmjs.com, or `npm stage approve <stage-id>` (the id is in this run's log and `npm stage list`).
 name: Stage on npm
 
 on:

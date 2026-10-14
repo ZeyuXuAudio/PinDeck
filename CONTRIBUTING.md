@@ -74,7 +74,7 @@ keep the version as it is.
 
 `git push --follow-tags` pushes the release and its tag; the tag starts a GitHub Actions workflow that
 stages the version on npm. It goes live once a maintainer approves it with 2FA, on npmjs.com or with
-`npm stage approve pindeck@X.Y.Z`.
+`npm stage approve <stage-id>` (the workflow's log and `npm stage list pindeck` show the id).
 
 ## Testing
 
