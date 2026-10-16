@@ -1,4 +1,4 @@
-# Stages a release on npm when a release tag (vX.Y.Z) is pushed. Uses npm trusted publishing (OIDC),
+# Stages a release on npm when a release tag (vX.Y.Z or vX.Y.Z-beta.N) is pushed. Uses npm trusted publishing (OIDC),
 # so no npm token is stored on GitHub. The version goes live only after a maintainer approves it
 # with 2FA: on npmjs.com, or `npm stage approve <stage-id>` (the id is in this run's log and `npm stage list`).
 name: Stage on npm
@@ -26,4 +26,10 @@ jobs:
         run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
       - name: Syntax check
         run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
-      - run: npm stage publish
+      - name: Stage on the appropriate npm channel
+        run: |
+          release_version="$(node -p 'require("./package.json").version')"
+          case "$release_version" in
+            *-*) npm stage publish --tag beta ;;
+            *)   npm stage publish --tag latest ;;
+          esac

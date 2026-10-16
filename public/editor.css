@@ -279,3 +279,18 @@ body.resizing-notes .stage iframe { pointer-events: none; }   /* keep the drag w
 @media (max-width: 1100px) {
   .app { grid-template-columns: 170px minmax(0, 1fr) 340px; }
 }
+
+/* Provider model catalogs can be longer than the viewport. */
+.menu.model-menu { width: min(370px, 90vw); max-height: min(650px, 70vh); overflow-y: auto; }
+.model-menu button.opt { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 2px 8px; }
+.model-menu button.opt .d { grid-column: 2; overflow-wrap: anywhere; }
+#provider-switch .dialog-buttons { flex-wrap: wrap; }
+
+.chat-head .menu-wrap { min-width: 0; flex: 1; }
+.chat-head .model-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-head .head-actions { flex-shrink: 0; }
+
+.chat-head { flex-wrap: wrap; }
+.chat-head .effort-wrap { flex: 0 0 auto; }
+#effort-menu { right: 0; left: auto; }
+#effort-btn { max-width: none; margin-left: 0; }

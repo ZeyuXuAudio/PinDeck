@@ -45,7 +45,7 @@
           <button id="select-toggle" class="toggle" aria-pressed="true"
             title="Select (V): click to select, drag to move, handles to resize, arrows to nudge (Shift: 10 px), Alt: no snapping. Double-click or Enter to edit text.">
             <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2l9 5-4 1.2L6.3 13z"/></svg> Select <kbd>V</kbd></button>
-          <button id="pin-toggle" class="toggle" title="Pin (P): click elements to pin them for Claude, Esc to stop" aria-pressed="false">
+          <button id="pin-toggle" class="toggle" title="Pin (P): click elements to pin them for the assistant, Esc to stop" aria-pressed="false">
             <span class="dot">1</span> Pin <kbd>P</kbd></button>
         </span>
         <span class="menu-wrap">
@@ -73,16 +73,20 @@
     </section>
   </main>
 
-  <!-- Right: chat with Claude -->
-  <aside class="chat-pane" aria-label="Claude">
+  <!-- Right: chat with the selected assistant -->
+  <aside class="chat-pane" aria-label="Assistant">
     <div class="pane-head chat-head">
       <span class="menu-wrap">
         <button id="model-btn" class="model-btn" aria-haspopup="menu" aria-expanded="false"
-          title="Model and effort for Claude">Claude <span id="model" class="muted"></span> ▾</button>
+          title="Choose model"><span id="model" class="muted"></span> ▾</button>
         <div id="model-menu" class="menu left model-menu" role="menu" hidden></div>
       </span>
+      <span class="menu-wrap effort-wrap">
+        <button id="effort-btn" class="model-btn" aria-label="Reasoning effort" aria-haspopup="menu" aria-expanded="false"><span id="effort">Effort</span> ▾</button>
+        <div id="effort-menu" class="menu model-menu" role="menu" aria-label="Reasoning effort" hidden></div>
+      </span>
       <span class="head-actions">
-        <span id="conn" class="conn" title="Claude Code session"></span>
+        <span id="conn" class="conn" title="Backend session"></span>
         <button id="new-chat" class="small" title="Start a new conversation">New chat</button>
       </span>
     </div>
@@ -92,25 +96,25 @@
         <p>Press <kbd>P</kbd> and click elements on the slide. Each click gets a number. Then write what to change, e.g.
           <em>“1: align with 2, make 3 smaller”</em>.</p>
         <p>Or edit yourself: click to select, drag to move, pull a handle to resize, arrow keys to nudge,
-          double-click to change the text. A selected element is what Claude takes “this” to mean.</p>
-        <p>Add figures, audio, a PDF or a screenshot with <strong>+</strong>, or drag and drop or paste a file; Claude can put it on a slide
+          double-click to change the text. A selected element is what the assistant takes “this” to mean.</p>
+        <p>Add figures, audio, a PDF or a screenshot with <strong>+</strong>, or drag and drop or paste a file; the assistant can put it on a slide
           or, for a paper or report, take the details from it.</p>
-        <p>Claude edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
+        <p>The assistant edits <code>index.html</code> and <code>theme.css</code>, checks the layout, and the slide updates here.
           <code>brand.css</code> is locked.</p>
       </div>
     </div>
     <div id="drop-hint" class="drop-hint" hidden><div>Drop figures, audio or PDFs to attach them</div></div>
-    <div id="working" class="working" hidden><span class="spinner"></span> <span id="working-text">Claude is working…</span></div>
+    <div id="working" class="working" hidden><span class="spinner"></span> <span id="working-text">The assistant is working…</span></div>
     <div class="composer">
       <div id="pin-tray" class="pin-tray"></div>
       <div id="attach-tray" class="attach-tray"></div>
-      <textarea id="input" rows="3" placeholder="Ask Claude… refer to pins by number (1, 2, …)"></textarea>
+      <textarea id="input" rows="3" placeholder="Ask for a change… refer to pins by number (1, 2, …)"></textarea>
       <div class="composer-row">
         <span class="menu-wrap">
           <button id="add-btn" class="add-round" aria-haspopup="menu" aria-expanded="false" aria-label="Add to the message"
             title="Add a file or a screenshot to the message">+</button>
           <div id="add-menu" class="menu up" role="menu" hidden>
-            <button role="menuitem" data-add="file"><strong>File…</strong><span>A figure, audio file or PDF (a figure, table, paper or report) for Claude to use (or drop or paste it)</span></button>
+            <button role="menuitem" data-add="file"><strong>File…</strong><span>A figure, audio file or PDF (a figure, table, paper or report) for the assistant to use (or drop or paste it)</span></button>
             <button role="menuitem" data-add="shot" id="add-shot"><strong>Screenshot</strong><span>This slide with its pins, for questions about how it looks</span></button>
           </div>
         </span>
@@ -123,6 +127,19 @@
     </div>
   </aside>
 </div>
+
+<dialog id="provider-switch" class="delete-dialog">
+  <form method="dialog">
+    <h3 id="provider-switch-title">Switch provider?</h3>
+    <p>This starts a new conversation. Carry over a summary of the current conversation?</p>
+    <p class="muted">The summary shares recent messages with the selected provider. Your slides and undo history stay unchanged.</p>
+    <div class="dialog-buttons">
+      <button value="cancel" autofocus>Cancel</button>
+      <button value="fresh">Start fresh</button>
+      <button value="summary" class="primary">Switch with summary</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="delete-dialog" class="delete-dialog">
   <form method="dialog">
@@ -146,7 +163,7 @@
     <div class="dialog-buttons">
       <span class="import-notes">
         <label class="check" id="import-refine-wrap" hidden><input type="checkbox" id="import-refine" checked>
-          <span id="import-refine-label">Then ask Claude to improve the complex slides</span></label>
+          <span id="import-refine-label">Then ask the assistant to improve the complex slides</span></label>
         <span class="muted small-note">Added after the current slide. You can undo this with ⌘Z.</span>
       </span>
       <button value="cancel">Cancel</button>

@@ -8,11 +8,12 @@ Open an issue with:
 
 * what you did, what you expected and what happened instead;
 * the PinDeck version (`package.json`), Node version, operating system and browser;
+* for AI issues: the selected provider, model, reasoning effort, and installed backend CLI version;
 * the terminal output of `node server.mjs`, and errors from the browser console if there are any;
 * if a deck is involved: the smallest piece of `index.html` (and `theme.css`) that shows the problem;
 * for the PowerPoint import: a small `.pptx` with only the slide that goes wrong, if you can share it.
 
-Do not attach decks or slides you may not share. Chat history and backups in `~/.pindeck/` can contain
+Do not attach decks or slides you may not share. Chat history and backups in `~/.pindeck-v3/` (`~/.pindeck/` for v2) can contain
 your slides' text, so check before you attach anything from there.
 
 ## Suggesting a feature
@@ -47,8 +48,8 @@ Useful while developing:
 * **Edit the deck as text.** PinDeck changes only the attribute, style or element it means to and
   leaves the rest of the file exactly as it was (see `lib/eids.mjs`). New code that writes to a deck
   should do the same.
-* **Keep Claude's permissions narrow.** Claude may edit `index.html` and `theme.css` and run `cli.mjs`,
-  nothing else; `brand.css` is locked. The server listens on 127.0.0.1 only and every API call needs
+* **Keep backend permissions narrow.** Both backends may edit only `index.html` and `theme.css`.
+  Claude uses allowlisted native tools and `cli.mjs`; Codex uses PinDeck’s restricted tool bridge; `brand.css` is locked. The server listens on 127.0.0.1 only and every API call needs
   the per-run token. Changes that widen any of this need a good reason in the pull request.
 * **Match the code around it:** short functions, comments that say why, plain wording in the UI and
   the README.
@@ -76,9 +77,21 @@ keep the version as it is.
 stages the version on npm. It goes live once a maintainer approves it with 2FA, on npmjs.com or with
 `npm stage approve <stage-id>` (the workflow's log and `npm stage list pindeck` show the id).
 
+### Beta releases
+
+Keep v3 preview work on `v3-beta` while `main` remains stable. Public betas use versions such as
+`3.0.0-beta.1`, with an annotated Git tag `v3.0.0-beta.1`. Increment the final number for each beta.
+Create a GitHub prerelease with known limitations and installation instructions.
+
+The staging workflow explicitly selects `beta` for prerelease versions (those containing `-`) and
+`latest` for stable versions. Approval publishes to the channel chosen when staging; it does not
+promote a beta to `latest`. Verify the staged version and channel before approving. Testers run
+`npx pindeck@beta /path/to/deck`; stable users run `npx pindeck@latest /path/to/deck`.
+Update the README’s availability notice when the branch and package actually become public.
+
 ## Testing
 
-Run `npm test` (Node's built-in test runner, `test/*.test.mjs`); it needs neither Claude nor a browser.
+Run `npm test` (Node's built-in test runner, `test/*.test.mjs`); it needs neither a live AI backend nor a browser.
 Then check your change by hand before you open a pull request:
 
 1. `node --check` on the files you changed.
@@ -92,7 +105,7 @@ Then check your change by hand before you open a pull request:
    * import slides from a PowerPoint file, if you changed `lib/pptx*.mjs`, `lib/omml.mjs` or `lib/zip.mjs`.
 3. Check that the deck file changed only where it should (`git diff` with the git filter set up).
 
-More tests that run without Claude or a browser, for example for `lib/eids.mjs` or the PowerPoint
+More tests that run without a live AI backend or a browser, for example for `lib/eids.mjs` or the PowerPoint
 import, are a very welcome contribution in themselves.
 
 ## Pull requests

@@ -1,7 +1,7 @@
 {
   "name": "pindeck",
-  "version": "2.8.1",
-  "description": "PinDeck: a local editor for HTML slide decks. Pin elements, describe the change, and Claude Code edits the slides.",
+  "version": "3.0.0-beta.1",
+  "description": "PinDeck: a local macOS HTML slide editor with Claude Code and OpenAI Codex.",
   "keywords": [
     "slides",
     "presentation",
@@ -9,10 +9,12 @@
     "editor",
     "claude",
     "claude-code",
-    "ai"
+    "ai",
+    "codex",
+    "openai"
   ],
   "license": "MIT",
-  "author": "Emanuël A. P. Habets",
+  "author": "Emanu\u00ebl A. P. Habets",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ehabets/PinDeck.git"
@@ -35,6 +37,7 @@
     "start": "node server.mjs",
     "test": "node --test"
   },
+  "os": ["darwin"],
   "engines": {
     "node": ">=20"
   }

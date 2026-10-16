@@ -9,11 +9,13 @@ const server = source('../server.mjs');
 const editor = source('../public/editor.js');
 
 // Exercise the actual route with controlled timers, without starting Claude or waiting five seconds.
-function stopHarness() {
-  const state = { busy: true, turn: {} }, timers = [];
+function stopHarness(overrides = {}) {
+  const state = { busy: true, turn: {}, ...overrides }, timers = [];
   let stops = 0, interrupts = 0;
   const context = vm.createContext({
     state, p: '/api/stop', req: { method: 'POST' }, res: {}, json() {},
+    starting: null,
+    finishTurn() { state.busy = false; },
     session: { running: true, interrupt() { interrupts++; }, stop() { stops++; } },
     setTimeout(fn) { timers.push(fn); },
   });
@@ -36,6 +38,12 @@ test('Stop still terminates the original unresponsive turn', () => {
   const h = stopHarness();
   h.expire();
   assert.deepEqual(h.counts(), { stops: 1, interrupts: 1 });
+});
+
+test('Stop cancels message preparation before a backend turn starts', () => {
+  const h = stopHarness({ turn: null, preparing: { cancelled: false } });
+  assert.equal(h.state.preparing.cancelled, true);
+  assert.deepEqual(h.counts(), { stops: 0, interrupts: 0 });
 });
 
 function notesHarness() {

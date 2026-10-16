@@ -1,4 +1,4 @@
-/* PinDeck UI: slide list, canvas with pins, chat with Claude Code. */
+/* PinDeck UI: slide list, canvas with pins, chat with the selected assistant. */
 
 const TOKEN = document.querySelector('meta[name="editor-token"]').content;
 const $ = (id) => document.getElementById(id);
@@ -261,7 +261,7 @@ slideList.addEventListener("drop", (e) => {
 async function moveSlideTo(from, to) {   // to: insertion index in the current list
   const s = state.slides[from];
   if (!s) return;
-  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  if (state.busy) return toast("The assistant is working. Wait until it has finished.");
   flushNudge();
   await editChain;
   const res = await api("move-slide", { eid: s.eid, before: state.slides[to]?.eid ?? null });
@@ -391,7 +391,7 @@ const EYE_OFF_ICON = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><pa
 async function toggleHidden(index = state.current) {
   const s = state.slides[index];
   if (!s) return;
-  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  if (state.busy) return toast("The assistant is working. Wait until it has finished.");
   flushNudge();
   await editChain;
   const res = await api("slide-hidden", { eid: s.eid, hidden: !s.hidden });
@@ -497,7 +497,7 @@ function shortEid(p) {
 function renderPinTray() {
   const sel = state.sel;
   $("pin-tray").innerHTML = (sel ? `
-    <span class="chip sel" data-sel title="Selected: ${esc(sel.eid)}. Claude sees it as “this”.">
+    <span class="chip sel" data-sel title="Selected: ${esc(sel.eid)}. The assistant sees it as “this”.">
       <span class="n">▢</span> S${sel.slide.index + 1} · ${esc(sel.eid.replace(/^[^/]+\//, ""))} <span class="dim">${sel.box.w} × ${sel.box.h}</span>
       <button class="x" data-unsel aria-label="Deselect">×</button></span>` : "") + state.pins.map((p) => `
     <span class="chip" data-n="${p.n}" title="${esc(p.eid)}${p.text ? " — " + esc(p.text.slice(0, 80)) : ""}">
@@ -573,7 +573,7 @@ function entryHtml(e) {
         if (t?.undone) parts.push("<span>undone</span>");
       } else if (!e.error) parts.push("No file changes");
       if (e.restored?.length) parts.push(`<span class="warn">${esc(e.restored.join(", "))} is locked; the change was reverted.</span>`);
-      if (e.denials?.length) parts.push(`<span class="warn" title="PinDeck lets Claude run only its own commands (layout, shot, slides, pdf) and edit index.html and theme.css">` +
+      if (e.denials?.length) parts.push(`<span class="warn" title="PinDeck lets the assistant run only its own commands (layout, shot, slides, pdf) and edit index.html and theme.css">` +
         `Not allowed in PinDeck, so skipped: ${e.denials.map((d) => esc(`${d.name} ${d.detail}`)).join(", ")}</span>`);
       if (e.duration) parts.push(`<span class="meta">${(e.duration / 1000).toFixed(1)} s</span>`);
       return parts.join(" ");
@@ -626,7 +626,7 @@ $("diff-close").onclick = () => $("diff-dialog").close();
 
 function setBusy(busy) {
   state.busy = busy;
-  $("notes").readOnly = busy;   // hand edits wait until Claude has finished
+  $("notes").readOnly = busy;   // hand edits wait until the assistant has finished
   $("working").hidden = !busy;
   main?.bridge.setEditable(!busy);
   $("send").hidden = busy;
@@ -668,7 +668,7 @@ async function send() {
 $("send").onclick = send;
 $("stop").onclick = () => api("stop", {});
 $("new-chat").onclick = async () => {
-  if (!confirm("Start a new conversation? Claude forgets this chat; your slides stay as they are.")) return;
+  if (!confirm("Start a new conversation? The assistant forgets this chat; your slides stay as they are.")) return;
   await api("new-chat", {});
 };
 function autosize() {
@@ -723,8 +723,13 @@ function applyStatus(s) {
   setBusy(!!s.busy);
   $("model").textContent = modelLabel(s);
   $("model-btn").disabled = !!s.busy;
+  $("model-btn").title = `${providerLabel(s.settings?.provider)} model`;
+  renderEffortMenu();
+  $("new-chat").disabled = !!s.busy;
+  $("stop").hidden = !s.busy || !!s.switching;
+  $("working-text").textContent = s.switching ? "Updating model…" : "The assistant is working…";
   $("conn").classList.toggle("on", !!s.running);
-  $("conn").title = s.running ? "Claude Code is running" : "Claude Code starts with the next message";
+  $("conn").title = s.running ? "The selected backend is running" : "The selected backend starts with the next message";
   $("add-shot").disabled = !s.chrome;
   $("add-shot").title = s.chrome ? "" : "Screenshots need Chrome or Chromium";
   $("add-slide-btn").disabled = !!s.busy;
@@ -793,7 +798,7 @@ $("add-slide-menu").addEventListener("click", async (e) => {
   if (!item) return;
   closeMenus();
   if (item.dataset.slide === "import") return $("import-file").click();
-  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  if (state.busy) return toast("The assistant is working. Wait until it has finished.");
   flushNudge();
   await editChain;
   const after = state.slides[state.current]?.eid;
@@ -837,11 +842,11 @@ function importStatus(msg, error = false) {
 const importChecks = () => [...$("import-list").querySelectorAll("input[type=checkbox]")];
 function updateImportButton() {
   const n = importChecks().filter((c) => c.checked).length;
-  // Claude's help with what the import only approximates (diagrams as pictures, lost build steps, ...)
+  // The assistant's help with what the import only approximates (diagrams as pictures, lost build steps, ...)
   const complex = importChecks().filter((c) => c.checked && importing.slides.find((s) => s.n === +c.value)?.complex.length).length;
   $("import-refine-wrap").hidden = !complex;
-  $("import-refine-label").textContent = complex === 1 ? "Then ask Claude to improve the complex slide"
-    : `Then ask Claude to improve the ${complex} complex slides`;
+  $("import-refine-label").textContent = complex === 1 ? "Then ask the assistant to improve the complex slide"
+    : `Then ask the assistant to improve the ${complex} complex slides`;
   $("import-go").textContent = n === 1 ? "Import 1 slide" : `Import ${n} slides`;
   $("import-go").disabled = !n;
   $("import-all").textContent = n === importChecks().length ? "Select none" : "Select all";
@@ -866,7 +871,7 @@ function showImportThumbs(ev) {
 $("import-dialog").addEventListener("close", async () => {
   if ($("import-dialog").returnValue !== "import" || !importing) return;
   const slides = importChecks().filter((c) => c.checked).map((c) => +c.value);
-  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  if (state.busy) return toast("The assistant is working. Wait until it has finished.");
   flushNudge();
   await editChain;
   toast(`Importing ${slides.length} slide${slides.length > 1 ? "s" : ""}…`, { ms: 60000 });
@@ -875,46 +880,95 @@ $("import-dialog").addEventListener("close", async () => {
   const d = await res.json().catch(() => ({}));
   if (!res.ok) return toast(d.error || "The import failed.");
   toast(`Imported ${d.count} slide${d.count > 1 ? "s" : ""}.` + (d.missing ? ` ${d.missing} diagram${d.missing > 1 ? "s" : ""} could not be pictured (no PowerPoint or Keynote).` : "") +
-    (d.refining ? ` Claude is improving ${d.refining === 1 ? "the complex slide" : `${d.refining} complex slides`}.` : ""), { ms: 5000 });
+    (d.refining ? ` The assistant is improving ${d.refining === 1 ? "the complex slide" : `${d.refining} complex slides`}.` : ""), { ms: 5000 });
   state.current = d.index;
   try { localStorage.setItem("editor.slide", String(d.index)); } catch {}
   loadMain();
 });
 
 /* ---- Model and effort --------------------------------------------------------------------------------- */
-const MODEL_CHOICES = [["opus", "Opus", "most capable, for layout and design work"], ["sonnet", "Sonnet", "faster, lighter on usage limits"]];
-const EFFORT_CHOICES = [["low", "Low", "quick edits"], ["medium", "Medium", ""], ["high", "High", ""],
-  ["xhigh", "Extra high", ""], ["max", "Max", "slowest, most careful"]];
-function prettyModel(id) {
-  const m = /claude-(\w+)-(\d+)(?:-(\d+))?/.exec(id || "");
-  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] && m[3].length <= 2 ? "." + m[3] : ""}` : id || "";
-}
+let modelCatalog = {};
+let showAllModels = false;
+try { showAllModels = localStorage.getItem("editor.showAllModels") === "true"; } catch {}
+const providerLabel = p => p === "codex" ? "OpenAI / ChatGPT" : "Claude";
 function modelLabel(s) {
   const st = s.settings || {};
-  // the full name (e.g. "Sonnet 5.5") once Claude Code has reported it for the chosen model, else the choice
-  const full = prettyModel(s.model);
-  const model = full && (!st.model || full.toLowerCase().startsWith(st.model)) ? full : MODEL_CHOICES.find((c) => c[0] === st.model)?.[1] || full;
-  return [model, st.effort ? EFFORT_CHOICES.find((c) => c[0] === st.effort)?.[1].toLowerCase() + " effort" : ""].filter(Boolean).join(" · ");
+  const model = (s.models?.[st.provider]?.models || []).find(m => m.id === st.model);
+  return model?.label || st.model || providerLabel(st.provider);
 }
 function renderModelMenu() {
   const st = state.status.settings || {};
-  const opt = (key, [value, label, desc]) => `<button class="opt" role="menuitemradio" aria-checked="${st[key] === value}"
-      data-set="${key}" data-value="${value}"><span class="tick">${st[key] === value ? "✓" : ""}</span>
-      <strong>${label}</strong>${desc ? `<span class="d muted">${desc}</span>` : ""}</button>`;
-  $("model-menu").innerHTML = `<div class="group">Model</div>${MODEL_CHOICES.map((c) => opt("model", c)).join("")}
-    <div class="sep"></div><div class="group">Effort: how long Claude thinks</div>${EFFORT_CHOICES.map((c) => opt("effort", c)).join("")}`;
+  modelCatalog = state.status.models || modelCatalog;
+  const groups = ["claude", "codex"].map(provider => {
+    const group = modelCatalog[provider] || {};
+    const visible = (group.models || []).filter(m => showAllModels || m.curated || (st.provider === provider && st.model === m.id));
+    return `<div class="group">${providerLabel(provider)}</div>` +
+      visible.map(m => `<button class="opt" role="menuitemradio" aria-checked="${st.provider === provider && st.model === m.id}"
+        data-provider="${provider}" data-model="${esc(m.id)}"><span class="tick">${st.provider === provider && st.model === m.id ? "✓" : ""}</span>
+        <strong>${esc(m.label)}${!showAllModels && !m.curated ? " (current)" : ""}</strong><span class="d muted">${esc(m.description)}</span></button>`).join("") +
+      (!visible.length ? `<div class="muted">${esc(group.error || (group.models?.length ? "No models match this filter. Choose Show all available models below." : "No models available. Try Refresh models."))}</div>` : "");
+  });
+  $("model-menu").innerHTML = groups.join('<div class="sep"></div>') +
+    `<div class="sep"></div><button data-model-filter>${showAllModels ? 'Show curated models' : 'Show all available models'}</button><button data-refresh>Refresh models</button>`;
 }
-wireMenu("model-btn", "model-menu", renderModelMenu);
-$("model-menu").addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-set]");
-  if (!b) return;
+const effortLabel = value => ({ none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra" }[value] || value);
+function renderEffortMenu() {
+  const st = state.status.settings || {};
+  const model = state.status.models?.[st.provider]?.models?.find(m => m.id === st.model);
+  const efforts = model?.efforts || [];
+  $("effort").textContent = efforts.length ? effortLabel(st.effort) || "Effort" : "Effort N/A";
+  $("effort-btn").disabled = !!state.status.busy || !efforts.length;
+  $("effort-btn").title = efforts.length ? `Reasoning effort: ${effortLabel(st.effort)}` : "No adjustable reasoning effort reported for this model";
+  $("effort-menu").innerHTML = '<div class="group">Reasoning effort</div>' + efforts.map(value => {
+    const hint = value === model.defaultEffort ? (model.effortDefaultSource === "provider" ? "Model default" : "PinDeck default") : "";
+    const description = model.effortDescriptions?.[value] || "";
+    return `<button class="opt" role="menuitemradio" aria-checked="${st.effort === value}" data-effort="${esc(value)}"><span class="tick">${st.effort === value ? "✓" : ""}</span><strong>${esc(effortLabel(value))}${hint ? ` · ${hint}` : ""}</strong>${description ? `<span class="d muted">${esc(description)}</span>` : ""}</button>`;
+  }).join("");
+}
+wireMenu("effort-btn", "effort-menu", renderEffortMenu);
+$("effort-menu").addEventListener("click", async e => {
+  const button = e.target.closest("[data-effort]");
+  if (!button || state.status.busy) return;
   e.stopPropagation();
-  const res = await api("settings", { [b.dataset.set]: b.dataset.value });
+  try { await setModelChoice({ effort: button.dataset.effort }); } catch (e) { toast(e.message); }
+});
+wireMenu("model-btn", "model-menu", renderModelMenu);
+async function setModelChoice(choice) {
+  const res = await api("settings", choice);
   const d = await res.json().catch(() => ({}));
-  if (!res.ok) return toast(d.error || "Could not change the setting.");
-  state.status.settings = d.settings;
-  renderModelMenu();
-  $("model").textContent = modelLabel(state.status);
+  if (!res.ok) return toast(d.error || "Could not change the model.");
+  state.status.settings = d.settings; renderModelMenu(); renderEffortMenu(); $("model").textContent = modelLabel(state.status);
+}
+let pendingModel = null;
+$("model-menu").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  e.stopPropagation();
+  if (b.hasAttribute("data-model-filter")) {
+    showAllModels = !showAllModels;
+    try { localStorage.setItem("editor.showAllModels", String(showAllModels)); } catch {}
+    renderModelMenu(); return;
+  }
+  if (b.hasAttribute("data-refresh")) {
+    b.disabled = true;
+    try { const r = await api("models"); if (!r.ok) throw new Error("Model discovery failed."); state.status.models = await r.json(); renderModelMenu(); renderEffortMenu(); }
+    catch (e) { toast(e.message); b.disabled = false; }
+    return;
+  }
+  if (state.status.busy) return;
+  const st = state.status.settings || {};
+  const choice = b.dataset.effort ? { effort: b.dataset.effort } : { provider: b.dataset.provider, model: b.dataset.model };
+  if (choice.provider && choice.provider !== st.provider) {
+    pendingModel = choice;
+    $("provider-switch-title").textContent = `Switch to ${providerLabel(choice.provider)}?`;
+    $("provider-switch").returnValue = "";
+    $("provider-switch").showModal();
+  } else { try { await setModelChoice(choice); } catch (e) { toast(e.message); } }
+});
+$("provider-switch").addEventListener("close", async () => {
+  const choice = pendingModel; pendingModel = null;
+  const handover = $("provider-switch").returnValue;
+  if (!choice || !["summary", "fresh"].includes(handover)) return;
+  try { await setModelChoice({ ...choice, handover }); } catch (e) { toast(e.message); }
 });
 
 /* ---- Delete the selected element ---------------------------------------------------------------------
@@ -923,7 +977,7 @@ $("model-menu").addEventListener("click", async (e) => {
 let deleting = false;
 async function requestDelete(eid) {
   if (deleting || !eid) return;
-  if (state.busy) return toast("Claude is working. Wait until it has finished.");
+  if (state.busy) return toast("The assistant is working. Wait until it has finished.");
   deleting = true;
   try {
     flushNudge();
@@ -964,7 +1018,7 @@ async function requestDelete(eid) {
 }
 
 /* ---- Attachments: figures, audio and PDFs for the next message ----------------------------------------
-   Files are uploaded at once into <deck>/figures/ (PDFs, reading material for Claude, outside the deck). Images get their pixel size, audio its duration and a
+   Files are uploaded at once into <deck>/figures/ (PDFs, reading material for the assistant, outside the deck). Images get their pixel size, audio its duration and a
    waveform SVG (bars, viewBox 1000 x 120, like the template's audio player), all computed here in the
    browser. Removing an attachment before sending deletes the uploaded file again. */
 let attachments = [], attachSeq = 0;
