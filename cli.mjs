@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* PinDeck command line: Claude's self-checks (need the PinDeck server running) and git setup.
+/* PinDeck command line: the assistant's self-checks (need the PinDeck server running) and git setup.
 
    node cli.mjs layout <slide>...   measured layout and issues of one or more slides
                                     (add --issues for the issues only: layout 9 10 11 --issues)
@@ -27,7 +27,7 @@ const arg = rest[0];
 
 /* git-setup: a git "clean" filter strips PinDeck's data-eid attributes whenever git reads the deck's
    HTML, so ids never reach a commit and id-only changes do not show in `git status`. The ids stay in
-   the file on disk, where PinDeck and Claude need them. The filter is plain sed, so it does not depend
+   the file on disk, where PinDeck and the assistant need them. The filter is plain sed, so it does not depend
    on where PinDeck is installed; git config is per clone, so run this once in each clone. */
 if (cmd === "git-setup") {
   const FILTER = `sed 's/ data-eid="[^"]*"//g'`;
@@ -69,14 +69,14 @@ function figureQuery(args) {
 let url = process.env.DECK_EDITOR_URL, token = process.env.DECK_EDITOR_TOKEN;
 if (!url || !token) {
   try {
-    const home = process.env.PINDECK_HOME || path.join(os.homedir(), ".pindeck");
+    const home = process.env.PINDECK_HOME || path.join(os.homedir(), ".pindeck-v3");
     const s = JSON.parse(fs.readFileSync(path.join(home, "server.json"), "utf8"));
     url = s.url; token = s.token;
   } catch {}
 }
 if (!url) { console.error("The PinDeck server is not running (start it with: pindeck <deck-folder>)."); process.exit(1); }
 
-/* layout and shot take several slides, so Claude needs no shell loop or pipe (which PinDeck refuses) */
+/* layout and shot take several slides, so the assistant needs no shell loop or pipe (which PinDeck refuses) */
 const queries = cmd === "pdf-figure" ? [figureQuery([...rest])]
   : cmd === "pdf" ? [{ slide: rest[0] || "handout", ...(rest[1] === "all" ? { all: "1" } : {}) }]
   : cmd === "slides" ? [{}] : (slides.length ? slides : ["current"]).map((slide) => ({ slide }));

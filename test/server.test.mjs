@@ -1,5 +1,5 @@
 /* The server as a real process: supported-platform startup, capabilities, the Claude Code lifecycle with a
-   fake claude (test/fixtures/fake-claude: no network, no AI), security checks, conflict-safe saves, Undo/Redo
+   fake claude (test/fixtures/fake-agent: no network, no AI), security checks, conflict-safe saves, Undo/Redo
    and the file watcher. Every test works on a fresh copy of ocean-example with its own PINDECK_HOME.
 
    Tests for a platform other than this machine's override process.platform; they check the code paths, not
@@ -19,7 +19,7 @@ import { cliCommand, findExecutable } from "../lib/capabilities.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SERVER = path.join(ROOT, "server.mjs");
-const FAKE_CLAUDE = path.join(ROOT, "test", "fixtures", "fake-claude");
+const FAKE_AGENT = path.join(ROOT, "test", "fixtures", "fake-agent");
 const EXAMPLE = path.join(ROOT, "ocean-example");
 const REAL = process.platform;
 const sha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
@@ -64,8 +64,8 @@ function spawnServer(fx, { platform = REAL, env = {}, args = ["--port", "0"], de
   }
   const child = spawn(process.execPath, [...pre, SERVER, deck, ...args], {
     env: { ...process.env, PATH: `${fx.shims}${path.delimiter}${process.env.PATH}`, PINDECK_HOME: fx.home,
-      CLAUDE_BIN: FAKE_CLAUDE, FAKE_CLAUDE_LOG: fx.log, CHROME_BIN: path.join(fx.root, "no-chrome"),
-      PINDECK_LINUX_CHROME: "", CLAUDE_MODEL: "", PORT: "", ...env },
+      CLAUDE_BIN: FAKE_AGENT, CODEX_BIN: FAKE_AGENT, FAKE_AGENT_LOG: fx.log, CHROME_BIN: path.join(fx.root, "no-chrome"),
+      PINDECK_LINUX_CHROME: "", PORT: "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,   // its own process group, so a test can stop it together with the claude it started
   });
@@ -117,6 +117,7 @@ const denied = (argv) => {
 };
 const fakeLog = (fx) => fs.existsSync(fx.log) ? fs.readFileSync(fx.log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 const fakePids = (fx) => [...new Set(fakeLog(fx).filter((e) => e.event === "start").map((e) => e.pid))];
+const claudeStart = (fx) => fakeLog(fx).find((e) => e.event === "start" && e.argv[0] !== "app-server");   // not the fake codex
 const firstSlideEid = (deck) => /<section[^>]*data-eid="([^"]+)"/.exec(fs.readFileSync(path.join(deck, "index.html"), "utf8"))[1];
 const chatOf = (fx) => {
   const dir = path.join(fx.home, "decks");
@@ -154,17 +155,17 @@ for (const platform of ["linux", "darwin"]) {
     assert.match(st.rev, /^[0-9a-f]{16}$/);
 
     // the fake claude runs in the deck, talks to this server, and gets PinDeck's narrow permissions
-    const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
+    const start = await waitFor(() => claudeStart(fx), "claude to start");
     assert.equal(fs.realpathSync(start.cwd), fs.realpathSync(fx.deck));
     assert.equal(start.url, s.url);
     const a = start.argv;
     assert.equal(a[a.indexOf("--setting-sources") + 1], "");
     assert.ok(a.includes("--strict-mcp-config"));
     const rel = path.relative(fx.deck, path.join(ROOT, "cli.mjs")).split(path.sep).join("/");
-    assert.ok(a.includes(`Bash(${cliCommand(rel)}:*)`), "the CLI permission is the one quoted command");
+    const commands = ["layout", "shot", "slides", "pdf", "pdf-figure"].map((c) => `Bash(${cliCommand(rel)} ${c}:*)`);
+    assert.ok(commands.every((c) => a.includes(c)), "the CLI permissions are the quoted command, one per PinDeck command");
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
-    assert.deepEqual(allowed, ["Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", `Bash(${cliCommand(rel)}:*)`],
-      "no broader permissions");
+    assert.deepEqual(allowed, ["Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", ...commands], "no broader permissions");
     assert.deepEqual(denied(a), ["Edit(./brand.css)", "Write(./brand.css)", "Edit(./vendor/**)", "Write(./vendor/**)",
       "Edit(./.git/**)", "Write(./.git/**)"], "the deck folder except brand.css, vendor/ and .git/");
 
@@ -221,7 +222,9 @@ test("Claude turn with fake Claude: edit, undo and redo", async (t) => {
   assert.equal(fs.readFileSync(theme, "utf8"), before);
   assert.equal((await s.api("redo", {})).status, 200);
   assert.ok(fs.readFileSync(theme, "utf8").includes("fake claude edit"));
-  assert.equal(fakePids(fx).length, 1, "one claude process for the whole chat");
+  // model discovery runs a short-lived claude of its own at start; the chat itself has one
+  assert.equal(new Set(fakeLog(fx).filter((e) => e.event === "input" && e.type === "user").map((e) => e.pid)).size, 1,
+    "one claude process for the whole chat");
 });
 
 test("A turn that changes, creates and deletes other deck files: one undo takes all of it back", async (t) => {
@@ -264,9 +267,33 @@ test("A turn that changes, creates and deletes other deck files: one undo takes 
   assert.match(fs.readFileSync(f("deck.js"), "utf8"), /fake append of deck\.js/, "nothing undone");
 });
 
+test("Codex: a turn changes, creates and deletes deck files, one undo takes it back; its tools reach this server", async (t) => {
+  const fx = fixture(t);
+  const s = await startServer(t, fx, { args: ["--port", "0", "--provider", "codex"] });
+  const f = (rel) => path.join(fx.deck, rel);
+  const orig = { "deck.js": fs.readFileSync(f("deck.js")), "README.md": fs.readFileSync(f("README.md")) };
+  assert.equal((await s.api("message", { text: "fake-op append deck.js fake-op write notes/codex.md fake-op delete README.md" })).status, 200);
+  const turn = await waitFor(() => chatOf(fx).find((e) => e.kind === "turn"), "the turn entry");
+  assert.equal(turn.error ?? null, null);
+  assert.deepEqual(turn.files.map((x) => x.file), ["deck.js", "notes/codex.md", "README.md"]);
+  const start = fakeLog(fx).find((e) => e.event === "start" && e.argv[0] === "app-server");
+  assert.ok(start, "codex app-server started");
+  assert.ok(!fakeLog(fx).some((e) => e.event === "input" && e.provider === "claude" && e.type === "user"), "no message went to Claude");
+  assert.equal((await s.api("undo", {})).status, 200);
+  for (const rel of Object.keys(orig)) assert.ok(fs.readFileSync(f(rel)).equals(orig[rel]), `${rel} restored`);
+  assert.equal(fs.existsSync(f("notes/codex.md")), false);
+  // PinDeck's tools for Codex call the CLI with this server's address, known only once it listens (--port 0)
+  const env = await import("../lib/agent-tools.mjs").then(({ createDeckTools }) => {
+    let seen = null;
+    const tools = createDeckTools({ deckDir: fx.deck, cliFile: path.join(ROOT, "cli.mjs"), env: () => (seen = { DECK_EDITOR_URL: s.url, DECK_EDITOR_TOKEN: serverInfo(fx, s.child.pid).token }) });
+    return tools("pindeck_command", { command: "slides", args: [] }).then((r) => ({ seen, out: r[0].text }));
+  });
+  assert.equal(env.seen.DECK_EDITOR_URL, s.url);
+  assert.match(env.out, /\S/, "the CLI answered");
+});
 test("Malformed and partial stream lines do not break a turn", async (t) => {
   const fx = fixture(t);
-  const s = await startServer(t, fx, { env: { FAKE_CLAUDE_MODE: "garbage" } });
+  const s = await startServer(t, fx, { env: { FAKE_AGENT_MODE: "garbage" } });
   assert.equal((await s.api("message", { text: "hello" })).status, 200);
   await waitFor(() => chatOf(fx).find((e) => e.kind === "assistant" && e.text === "Done (fake)."), "the answer");
   assert.equal((await s.api("status")).data.busy, false);
@@ -287,10 +314,10 @@ test("Missing claude: manual editing works, messages are refused before anything
 
 test("Claude that fails to log in ends the turn with an error; the editor keeps working", async (t) => {
   const fx = fixture(t);
-  const s = await startServer(t, fx, { env: { FAKE_CLAUDE_MODE: "auth-fail" } });
+  const s = await startServer(t, fx, { env: { FAKE_AGENT_MODE: "auth-fail" } });
   assert.equal((await s.api("message", { text: "hello" })).status, 200);
   const turn = await waitFor(() => chatOf(fx).find((e) => e.kind === "turn"), "the failed turn");
-  assert.match(turn.error, /Claude Code stopped .*Please run \/login/);
+  assert.match(turn.error, /Claude is not signed in\. Run claude auth login/);
   assert.equal((await s.api("status")).data.busy, false);
   assert.equal((await s.api("notes", { eid: firstSlideEid(fx.deck), text: "after the failure" })).status, 200);
 });
@@ -310,7 +337,7 @@ test("SIGTERM: Claude gets end of input, the server exits and removes only its o
 
 test("SIGTERM with a Claude that ignores end of input and SIGTERM: killed, bounded shutdown", async (t) => {
   const fx = fixture(t);
-  const s = await startServer(t, fx, { env: { FAKE_CLAUDE_MODE: "stubborn" } });
+  const s = await startServer(t, fx, { env: { FAKE_AGENT_MODE: "stubborn" } });
   const [pid] = await waitFor(() => fakePids(fx).length && fakePids(fx), "claude to start");
   const t0 = Date.now();
   s.child.kill("SIGTERM");
@@ -423,7 +450,7 @@ test("Asset root: the deck is served inside it, so ../ paths work; nothing outsi
   assert.notEqual((await fetch(`${s.url}/files/..%2f..%2fetc%2fpasswd`, { headers: auth })).status, 200);
   // the deck's own files are still at /deck/ (attachments, exports)
   assert.equal((await fetch(`${s.url}/deck/theme.css`, { headers: auth })).status, 200);
-  const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
+  const start = await waitFor(() => claudeStart(fx), "claude to start");
   const prompt = start.argv[start.argv.indexOf("--append-system-prompt") + 1];
   assert.ok(prompt.includes(`## Files outside the deck folder\nThe deck may use files in ${fx.root}`));
 });
@@ -478,7 +505,7 @@ test("A named deck file: served, edited, given ids and permissions, with state o
   assert.equal(sha(index), indexBefore, "index.html untouched");
 
   // Claude may edit this file (and theme.css), and is told its name
-  const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
+  const start = await waitFor(() => claudeStart(fx), "claude to start");
   const a = start.argv;
   const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
   assert.ok(allowed.includes("Edit(./**)"));
@@ -527,7 +554,7 @@ test("The deck's CLAUDE.md and AGENTS.md reach Claude with this server's CLI com
   fs.appendFileSync(path.join(fx.deck, "CLAUDE.md"), "\n- Old rule: run `node ../cli.mjs layout 3` after edits.\n");
   fs.writeFileSync(path.join(fx.deck, "AGENTS.md"), "# Agents\n\nUse British spelling.\n");
   await startServer(t, fx);
-  const a = (await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start")).argv;
+  const a = (await waitFor(() => claudeStart(fx), "claude to start")).argv;
   const prompt = a[a.indexOf("--append-system-prompt") + 1];
   const cli = cliCommand(path.relative(fx.deck, path.join(ROOT, "cli.mjs")).split(path.sep).join("/"));
   assert.match(prompt, /## The deck's CLAUDE\.md/);
@@ -544,7 +571,7 @@ test("A parent folder's CLAUDE.md is not loaded; an @import in the deck's own CL
   fs.writeFileSync(path.join(fx.root, "shared", "STYLE.md"), "Shared rule: British spelling.\n");
   fs.appendFileSync(path.join(fx.deck, "CLAUDE.md"), "\nFollow @../shared/STYLE.md for wording.\n");
   await startServer(t, fx);
-  const a = (await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start")).argv;
+  const a = (await waitFor(() => claudeStart(fx), "claude to start")).argv;
   const prompt = a[a.indexOf("--append-system-prompt") + 1];
   assert.doesNotMatch(prompt, /Parent rule/);
   assert.match(prompt, /Follow \.\.\/shared\/STYLE\.md \(included below\) for wording\./);

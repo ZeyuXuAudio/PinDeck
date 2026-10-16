@@ -1,7 +1,7 @@
 {
   "name": "pindeck",
-  "version": "2.10.0-beta.1",
-  "description": "PinDeck: an editor for HTML slide decks on macOS, and on Linux (beta) through an SSH tunnel. Pin elements, describe the change, and Claude Code edits the slides.",
+  "version": "3.0.0-beta.1",
+  "description": "PinDeck: an editor for HTML slide decks on macOS, and on Linux (beta) through an SSH tunnel. Pin elements, describe the change, and Claude Code or OpenAI Codex edits the slides.",
   "keywords": [
     "slides",
     "presentation",
@@ -9,10 +9,12 @@
     "editor",
     "claude",
     "claude-code",
-    "ai"
+    "ai",
+    "codex",
+    "openai"
   ],
   "license": "MIT",
-  "author": "Emanuël A. P. Habets",
+  "author": "Emanu\u00ebl A. P. Habets",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ehabets/PinDeck.git"

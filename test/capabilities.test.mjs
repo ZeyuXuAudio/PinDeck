@@ -32,6 +32,14 @@ test("claude is found on the PATH or through CLAUDE_BIN, never run", (t) => {
   assert.match(c.reason, /Editing by hand still works/);
 });
 
+test("codex is found on the PATH or through CODEX_BIN, never run", (t) => {
+  const { dir, p } = bin(t, "codex");
+  assert.equal(detectCapabilities({ platform: "linux", env: { PATH: dir } }).codex.available, true);
+  assert.equal(detectCapabilities({ platform: "linux", env: { PATH: "/nonexistent" } }).codex.available, false);
+  assert.equal(detectCapabilities({ platform: "linux", env: { PATH: "", CODEX_BIN: p } }).codex.available, true);
+  assert.match(detectCapabilities({ platform: "linux", env: { PATH: "/nonexistent" } }).codex.reason, /CODEX_BIN/);
+});
+
 test("Linux: import on; tool features off with reasons until their tools exist; Chrome on unless turned off", (t) => {
   const { p, dir } = bin(t, "chromium");
   const caps = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p } });

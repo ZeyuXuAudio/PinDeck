@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+/* A stand-in for the claude and codex CLIs, for tests: no network, no login, no AI. Run as `codex app-server`
+   it speaks Codex's app-server protocol; `claude auth status` answers the login check; anything else is
+   Claude Code in stream-json mode.
+
+   FAKE_AGENT_LOG   a file to append one JSON line per event to (start with argv and cwd, input with the
+                    provider and the message text, signals)
+   FAKE_AGENT_MODE  "ok" (default): answers each message, appending a comment to theme.css when the
+                    message contains "edit theme", and doing "fake-op write|append|delete <path>" for each
+                    such phrase (a path relative to the deck; write and append add a line naming the turn);
+                    "auth-fail": claude is not logged in (auth status fails, the CLI prints a login error and exits 1);
+                    "stubborn": ignores end of input and SIGTERM (only SIGKILL stops it);
+                    "garbage": writes malformed and partial lines before each answer
+   Codex models: gpt-test, and gpt-fail, whose threads fail to start. A thread has one writer at a time. */
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
+
+const mode = process.env.FAKE_AGENT_MODE || "ok";
+const logFile = process.env.FAKE_AGENT_LOG;
+const log = (o) => { if (logFile) fs.appendFileSync(logFile, JSON.stringify({ pid: process.pid, ...o }) + "\n"); };
+const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+
+/* The deck changes a message asks for, the same for both providers */
+function act(text) {
+  if (/edit theme/.test(text)) fs.appendFileSync(path.join(process.cwd(), "theme.css"), "\n/* fake claude edit */\n");
+  for (const [, op, rel] of text.matchAll(/fake-op (write|append|delete) (\S+)/g)) {
+    const abs = path.join(process.cwd(), rel);
+    if (op === "delete") { fs.rmSync(abs, { force: true }); continue; }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    (op === "write" ? fs.writeFileSync : fs.appendFileSync)(abs, `/* fake ${op} of ${rel} */\n`);
+  }
+}
+
+if (process.argv[2] === "auth") {
+  if (mode === "auth-fail") { console.log(JSON.stringify({ loggedIn: false })); process.exit(1); }
+  console.log(JSON.stringify({ loggedIn: true }));
+  process.exit(0);
+}
+log({ event: "start", argv: process.argv.slice(2), cwd: process.cwd(), url: process.env.DECK_EDITOR_URL || null });
+process.on("SIGTERM", () => {
+  log({ event: "sigterm" });
+  if (mode !== "stubborn") process.exit(143);
+});
+if (mode === "stubborn") setInterval(() => {}, 1000);
+
+if (process.argv[2] === "app-server") codex();
+else claude();
+
+function claude() {
+  if (mode === "auth-fail") {
+    process.stderr.write("Invalid API key · Please run /login\n");
+    process.exit(1);
+  }
+  const session = "fake-session-1";
+  out({ type: "system", subtype: "init", session_id: session, model: "fake-model" });
+  const models = [{ value: "sonnet", displayName: "Sonnet", supportedEffortLevels: ["low", "medium"] }, { value: "haiku", displayName: "Haiku" }];
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    const text = (msg.message?.content || []).map((c) => c.text || "").join(" ");
+    log({ event: "input", provider: "claude", type: msg.type, subtype: msg.request?.subtype, ...(msg.type === "user" ? { text } : {}) });
+    if (msg.type === "control_request") {
+      out({ type: "control_response", response: { subtype: "success", request_id: msg.request_id,
+        response: msg.request?.subtype === "initialize" ? { models } : {} } });
+      return;
+    }
+    if (msg.type !== "user") return;
+    if (mode === "garbage") process.stdout.write("not json\n{\"type\":\"assist");   // a partial line, completed below
+    if (mode === "garbage") process.stdout.write("\n");
+    act(text);
+    out({ type: "assistant", session_id: session, message: { content: [{ type: "text", text: "Done (fake)." }] } });
+    out({ type: "result", subtype: "success", is_error: false, session_id: session, total_cost_usd: 0, duration_ms: 1 });
+  }).on("close", () => {
+    log({ event: "eof" });
+    if (mode !== "stubborn") process.exit(0);
+  });
+}
+
+function codex() {
+  let thread = null, turn = 0, lock = null;
+  process.on("exit", () => { if (lock) try { fs.unlinkSync(lock); } catch {} });
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    let m;
+    try { m = JSON.parse(line); } catch { return; }
+    const p = m.params || {};
+    const reply = (result) => out({ id: m.id, result });
+    const fail = (message) => out({ id: m.id, error: { message } });
+    if (m.method === "initialize") reply({});
+    if (m.method === "account/read") reply({ requiresOpenaiAuth: true, account: { type: "apiKey" } });
+    if (m.method === "model/list") reply({ data: [
+      { id: "gpt-test", model: "gpt-test", displayName: "GPT Test", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }], isDefault: true },
+      { id: "gpt-fail", model: "gpt-fail", displayName: "Unavailable at start", supportedReasoningEfforts: [] }], nextCursor: null });
+    if (m.method === "config/read") reply({ config: { mcp_servers: {}, plugins: {} } });
+    if (m.method === "thread/start" || m.method === "thread/resume") {
+      if (p.model === "gpt-fail") return fail("Simulated backend startup failure");
+      thread = p.threadId || "codex-" + process.pid;
+      const nextLock = logFile && `${logFile}.${thread}.lock`;
+      if (nextLock && fs.existsSync(nextLock)) return fail("Thread already has an active writer");
+      if (nextLock) { lock = nextLock; fs.writeFileSync(lock, String(process.pid)); }
+      reply({ thread: { id: thread }, model: p.model });
+    }
+    if (m.method === "turn/start") {
+      const id = "turn-" + (++turn);
+      const text = (p.input || []).map((c) => c.text || "").join(" ");
+      log({ event: "input", provider: "codex", type: "user", text });
+      reply({ turn: { id } });
+      act(text);
+      out({ method: "item/completed", params: { threadId: thread, turnId: id, item: { type: "agentMessage", text: "Done (fake)." } } });
+      setTimeout(() => out({ method: "turn/completed", params: { threadId: thread, turn: { id, status: "completed" } } }), 10);
+    }
+    if (m.method === "turn/interrupt") {
+      reply({});
+      out({ method: "turn/completed", params: { threadId: thread, turn: { id: "turn-" + turn, status: "interrupted" } } });
+    }
+  }).on("close", () => {
+    log({ event: "eof" });
+    if (mode !== "stubborn") process.exit(0);
+  });
+}

@@ -1,5 +1,5 @@
 # Tests on real Linux and macOS, Node 22 and 24. The tests start PinDeck servers on copies of the example
-# deck with a fake claude (test/fixtures/fake-claude): no Claude login, no network, no AI. Screenshots,
+# deck with a fake claude and codex (test/fixtures/fake-agent): no login, no network, no AI. Screenshots,
 # headless layout and PDF export run with the runner's real Chrome.
 name: Test
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /* PinDeck: local server.
 
-   pindeck [deck-dir] [--port 5180] [--model <name>]      (or: node server.mjs ...)
+   pindeck [deck-dir | deck.html] [--port 5180] [--provider claude|codex] [--model <name>] [--asset-root <dir>]   (or: node server.mjs ...)
 
    - serves the editor UI and the deck (with a bridge script injected in edit mode)
    - pushes file changes to the browser (server-sent events) for live reload
-   - runs one long-lived Claude Code process for the chat sidebar
-   - snapshots files around every Claude turn for diffs and undo
-   - answers `cli.mjs layout|shot|slides|pdf|pdf-figure` for Claude's self-checks, exports and PDF figures
+   - runs one long-lived backend process for the chat sidebar
+   - snapshots files around every assistant turn for diffs and undo
+   - answers `cli.mjs layout|shot|slides|pdf|pdf-figure` for the assistant's self-checks, exports and PDF figures
    - exports the deck as a PDF handout or a PDF presentation (build steps on separate pages)
-   - stores figures and audio attached to chat messages in <deck>/figures/ for Claude to use, and attached
+   - stores figures and audio attached to chat messages in <deck>/figures/ for the assistant to use, and attached
      PDFs (papers, reports, figures) in ~/.pindeck, outside the deck
    - imports slides from PowerPoint files in the deck's own layouts
    Listens on 127.0.0.1 only; the editor, the deck and every API call need the per-run token (a login
@@ -27,6 +27,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { assignEids, parse, findSlides, setStyles, getInner, setInner, insertAfter, removeElement, deleteTarget, fileRefs, insertSlide, moveSlide, getNotes, setNotes, setAttr, elementEnd } from "./lib/eids.mjs";
 import { unifiedDiff } from "./lib/diff.mjs";
 import { ClaudeSession } from "./lib/claude.mjs";
+import { CodexSession } from "./lib/codex.mjs";
+import { createDeckTools } from "./lib/agent-tools.mjs";
+import { migrateSettings, selectModel, handoverSummary, curateModels } from "./lib/models.mjs";
 import { formatLayout, formatPin } from "./lib/layout.mjs";
 import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs";
 import { readPptx } from "./lib/pptx.mjs";
@@ -38,7 +41,7 @@ import { readInstructions } from "./lib/instructions.mjs";
 import { writeAtomic, sameContent, revision, scanFiles, scanChanges } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
-const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--model <name>] [--asset-root <folder>]...
+const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--provider claude|codex] [--model <name>] [--asset-root <folder>]...
        pindeck login [deck-folder | deck-file.html]
 
 Opens a reveal.js deck in PinDeck: a deck file such as talk.html, or a folder (default: the current
@@ -47,7 +50,7 @@ login prints a new one-time login link for the PinDeck running for that deck
 (without a deck: for the PinDeck started last).
 --asset-root lets the deck use files outside its folder: a folder that contains the deck (paths such as
 ../shared/style.css then work), or one that symlinks in the deck may point to. Repeatable; also
-"assetRoots" in ~/.pindeck/config.json.`;
+"assetRoots" in ~/.pindeck-v3/config.json.`;
 const EDITOR_DIR = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
@@ -64,7 +67,8 @@ if (!isSupportedPlatform(process.platform)) {
 }
 const LOGIN = argv[0] === "login";
 if (LOGIN) argv.shift();
-const MODEL = opt("--model", process.env.CLAUDE_MODEL || "");
+const PROVIDER = opt("--provider", "");
+const MODEL = opt("--model", "");
 /* The deck: a file (talk.html), or a folder, which means its index.html. A path ending in .html or .htm
    that is not a folder is a file, so a missing file gets a clear message. */
 const TARGET = path.resolve(argv[0] || process.cwd());
@@ -73,9 +77,9 @@ const DECK_DIR = isFolder || !/\.html?$/i.test(TARGET) ? TARGET : path.dirname(T
 const DECK_FILE = DECK_DIR === TARGET ? "index.html" : path.basename(TARGET);
 const NAMED = DECK_FILE !== "index.html";             // a deck file with its own name; several can share a folder
 const DECK_NAME = NAMED ? DECK_FILE.replace(/\.html?$/i, "") : path.basename(DECK_DIR);   // for exports and titles
-const EDITABLE = [DECK_FILE, "theme.css"];         // Claude may edit these
+const EDITABLE = [DECK_FILE, "theme.css"];         // both backends may edit these
 const LOCKED = ["brand.css"];                      // never, enforced twice
-const HOME_DIR = process.env.PINDECK_HOME || path.join(os.homedir(), ".pindeck");
+const HOME_DIR = process.env.PINDECK_HOME || path.join(os.homedir(), ".pindeck-v3");
 /* State per deck file. A folder's index.html keeps the key it always had, so existing chats and undo
    histories stay; a named file gets its own, so two decks in one folder never share chat or undo. */
 const deckKey = (NAMED ? `${path.basename(DECK_DIR)}-${DECK_NAME}` : path.basename(DECK_DIR)).replace(/[^\w.-]+/g, "_") + "-" +
@@ -375,25 +379,27 @@ function exportPdf(kind, includeHidden = false) {
   return job;
 }
 
-/* ---- Chat state and the Claude Code session --------------------------------------------- */
+/* ---- Chat state and the selected backend session --------------------------------------------- */
 const CHAT_FILE = path.join(STATE_DIR, "chat.json");
 const state = {
-  chat: [], seq: 0, busy: false, model: MODEL || null, sessionId: null,
+  chat: [], seq: 0, busy: false, model: MODEL || null, switching: false, preparing: null, sessionId: null, provider: "claude", handover: "", sessionArchive: [],
   turns: [], redo: [], turn: null, notes: [], pins: [], current: null,
   uploads: new Set(),   // files uploaded for the next message; removable until it is sent
   pdfFigures: new Set(),   // figures/ files written by pdf-figure, which it may overwrite
 };
 try {
   const saved = JSON.parse(fs.readFileSync(CHAT_FILE, "utf8"));
-  Object.assign(state, { chat: saved.chat || [], seq: saved.seq || 0, sessionId: saved.sessionId || null });
+  Object.assign(state, { chat: saved.chat || [], seq: saved.seq || 0, sessionId: saved.sessionId || null, provider: saved.provider || "claude", handover: saved.handover || "", sessionArchive: saved.sessionArchive || [] });
 } catch {}
 /* Saved shortly after the last change, in one atomic write: overlapping writes could leave a broken file. */
 let chatTimer = null;
 function writeChat() {
   clearTimeout(chatTimer);
   chatTimer = null;
-  try { writeAtomic(CHAT_FILE, JSON.stringify({ chat: state.chat.slice(-400), seq: state.seq, sessionId: state.sessionId })); }
-  catch (e) { console.error(e.message); }
+  try {
+    writeAtomic(CHAT_FILE, JSON.stringify({ chat: state.chat.slice(-400), seq: state.seq, sessionId: state.sessionId,
+      provider: state.provider, handover: state.handover, sessionArchive: state.sessionArchive.slice(-50) }));
+  } catch (e) { console.error(e.message); }
 }
 const saveChat = () => { chatTimer ??= setTimeout(writeChat, 100); };
 function addEntry(entry) {
@@ -405,22 +411,26 @@ function addEntry(entry) {
   return entry;
 }
 const liveTurns = () => state.turns.filter((t) => !t.undone);
-const changeLabel = (t) => (t ? (t.kind === "manual" ? t.label : "Claude's change") : null);
-/* Model and effort for the Claude Code session. ~/.pindeck/config.json holds them: PinDeck creates it
-   with the defaults below, you can edit it, and a choice in the chat header's menu is saved there too,
-   so the file always shows what PinDeck uses. --model on the command line applies to one run only. */
-const MODELS = ["opus", "sonnet"];
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-const DEFAULTS = { model: "sonnet", effort: "medium" };
+const changeLabel = (t) => (t ? (t.kind === "manual" ? t.label : "AI change") : null);
+/* The menu persists provider, model and effort. CLI overrides apply to this run only.
+   The v3 preview uses its own state directory so v2 can keep running independently. */
 const CONFIG_FILE = path.join(HOME_DIR, "config.json");
-const settings = { ...DEFAULTS };
 let fileConfig = {};
 try { fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8")); }
 catch (e) { if (e.code !== "ENOENT") console.warn(`${CONFIG_FILE} is not valid JSON; using the defaults.`); }
-if (MODELS.includes(fileConfig.model)) settings.model = fileConfig.model;
-else if (fileConfig.model !== undefined) console.warn(`config.json: unknown model "${fileConfig.model}" (use ${MODELS.join(" or ")}); using ${DEFAULTS.model}.`);
-if (EFFORTS.includes(fileConfig.effort)) settings.effort = fileConfig.effort;
-else if (fileConfig.effort !== undefined) console.warn(`config.json: unknown effort "${fileConfig.effort}" (use ${EFFORTS.join(", ")}); using ${DEFAULTS.effort}.`);
+const settings = migrateSettings(fileConfig);
+let effortPreferences = Object.fromEntries(Object.entries(fileConfig.effortPreferences || {}).filter(([, value]) => typeof value === "string"));
+// Preserve the legacy selection as the first model-specific preference.
+if (settings.effort) effortPreferences[`${settings.provider}:${settings.model}`] = settings.effort;
+if (PROVIDER) {
+  if (!["claude", "codex"].includes(PROVIDER)) { console.error(`Unknown provider "${PROVIDER}": use claude or codex.\n\n${USAGE}`); process.exit(2); }
+  settings.provider = PROVIDER;
+  if (!MODEL && PROVIDER !== fileConfig.provider) settings.model = PROVIDER === "claude" ? "sonnet" : "";
+}
+if (MODEL) settings.model = MODEL;   // --model on the command line: this run only, not saved
+// A saved chat belongs to its provider, never to whichever CLI happens to be selected now.
+if (state.provider !== settings.provider) { state.sessionId = null; state.handover = ""; }
+state.provider = settings.provider;
 /* Asset roots (--asset-root, and "assetRoots" in config.json): folders outside the deck whose files the
    deck may use. The outermost one that contains the deck is served at /files/, with the deck page inside
    it, so a relative path such as ../shared/style.css reaches its file. Every file served, from the deck
@@ -452,15 +462,12 @@ function servable(base, rel) {
   try { real = fs.realpathSync(f); } catch { return f; }
   return ALLOWED_REAL.some((d) => within(d, real)) ? f : null;
 }
-const saveSettings = () => fs.writeFile(CONFIG_FILE, JSON.stringify({ ...fileConfig, model: settings.model, effort: settings.effort }, null, 2) + "\n", () => {});
-const completeSettings = () => {   // create or complete the file (at start, once the port is bound)
-  if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort) saveSettings();
-};
-if (MODEL) settings.model = MODEL;   // --model on the command line: this run only, not saved
 
-const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId, settings: { ...settings },
-  running: session.running, deck: DECK_DIR, deckFile: DECK_FILE, chrome: CAPS.screenshot.available,
-  capabilities: publicCapabilities(CAPS), rev: deckRev(),
+let catalog = { claude: { models: [] }, codex: { models: [] } }, discovering = null;
+let session = null, starting = null;
+const status = () => ({ busy: state.busy, switching: state.switching, model: state.model, sessionId: state.sessionId, settings: { ...settings },
+  running: !!session?.running, provider: settings.provider, models: catalog, deck: DECK_DIR, deckFile: DECK_FILE,
+  chrome: CAPS.screenshot.available, capabilities: publicCapabilities(CAPS), rev: deckRev(),
   undo: changeLabel(liveTurns().at(-1)), redo: changeLabel(state.redo.at(-1)) });
 const pushStatus = () => broadcast("status", status());
 
@@ -493,36 +500,125 @@ function deckInstructions() {
     return s ? `\n\n## The deck's ${name}\n${s.replace(/node \.\.\/cli\.mjs\b/g, () => CLI_CMD)}\n` : "";
   }).join("");
 }
-let stderrTail = "";
-const session = new ClaudeSession({
-  cwd: DECK_DIR,
-  env: () => ({ DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN }),
-  args: () => [
-    "--append-system-prompt", systemPrompt + deckInstructions(),
-    "--setting-sources", "", "--strict-mcp-config",   // no settings files, no MCP servers or connectors
-    "--permission-mode", "default",
-    // any file in the deck folder (Edit rules cover Write too; Write is named as well, to be explicit)
-    "--allowedTools", "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", `Bash(${CLI_CMD}:*)`,
-    "--disallowedTools", ...lockedPaths().flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
-    ...(settings.model ? ["--model", settings.model] : []),
-    ...(settings.effort ? ["--effort", settings.effort] : []),
-  ],
-  onStderr: (s) => { stderrTail = (stderrTail + s).slice(-2000); },
-  onEvent: handleEvent,
-  onExit: (code, signal, { stale } = {}) => {
-    if (state.busy && state.turn && !stale) {
-      const why = code == null && signal == null ? "could not start" : `stopped (${signal || "exit " + code})`;
-      const hint = /ENOENT/.test(stderrTail) ? " Is the claude command installed and on the PATH (or set CLAUDE_BIN)?" : "";
-      finishTurn({ error: `Claude Code ${why}. ${stderrTail.trim().split("\n").pop() || ""}${hint}` });
-    }
-    pushStatus();
-  },
-});
-function ensureSession() {
-  if (session.running || quitting || !detectCapabilities().claude.available) return;
-  stderrTail = "";
-  session.start(state.sessionId);
-  pushStatus();
+// a function: ORIGIN is known only once the port is bound
+const agentEnv = () => ({ DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN });
+const agentTools = createDeckTools({ deckDir: DECK_DIR, deckFile: DECK_FILE, readDirs: [SHOT_DIR, PDF_DIR, ...ASSET_ROOTS],
+  locked: lockedPaths, cliFile: path.join(EDITOR_DIR, "cli.mjs"), pdfTextFile: path.join(EDITOR_DIR, "lib/pdf-text.jxa.js"),
+  env: agentEnv });
+const codexInstructions = () => systemPrompt.replace(/## Attached files[\s\S]*?## Hand edits/, `## Tools and attachments
+Figures and audio are already saved under figures/. Keep their paths and use the deck's existing figure/audio patterns. Do not rename or move attachments.
+Use pindeck_read for text files, images and PDF pages (supply page: 1, then further pages as needed).
+Use pindeck_edit for exact replacements in ${DECK_FILE}, theme.css and the deck's other files, and pindeck_write to create a new file in the deck folder. Never change brand.css.
+Use pindeck_command with separate command and args for layout, shot, slides, pdf or pdf-figure.
+Do not use shell commands, native file edits, or other tools to bypass these restrictions.
+When context mentions Read, use pindeck_read. Read screenshots with pindeck_read.
+Read README.md and the deck instructions below for conventions. Use layout after every visual change.
+PDF tables should be reconstructed as HTML; pdf-figure renders figures. Audio is embedded by path.
+
+## Hand edits`) + deckInstructions();
+function makeSession(choice) {
+  let initial = null;
+  const options = {
+    cwd: DECK_DIR,
+    env: agentEnv,
+    onEvent: ev => {
+      if (ev.type === "system" && ev.subtype === "init") initial = ev;
+      if (session === agent) handleEvent(ev);
+    },
+    onExit: error => {
+      if (session !== agent) return;
+      if (state.turn) finishTurn({ error: error.message });
+      pushStatus();
+    },
+  };
+  /* Claude Code: any file in the deck folder (Edit rules cover Write too; Write is named as well, to be
+     explicit), PinDeck's own commands, never the locked paths. Deny rules win over allow rules. */
+  const agent = choice.provider === "codex" ? new CodexSession({ ...options, settings: choice,
+    instructions: codexInstructions(), tools: agentTools }) : new ClaudeSession({ ...options,
+    args: () => ["--append-system-prompt", systemPrompt + deckInstructions(),
+      "--setting-sources", "", "--strict-mcp-config", "--safe-mode", "--disable-slash-commands",   // no settings files, no MCP servers or connectors
+      "--permission-mode", "default", "--tools", "Read,Glob,Grep,Edit,Write,Bash",
+      "--allowedTools", "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)",
+      ...["layout", "shot", "slides", "pdf", "pdf-figure"].map(command => `Bash(${CLI_CMD} ${command}:*)`),
+      "--disallowedTools", ...lockedPaths().flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
+      ...(choice.model ? ["--model", choice.model] : []), ...(choice.effort ? ["--effort", choice.effort] : [])],
+  });
+  agent.initialEvent = () => initial;
+  return agent;
+}
+const providerAvailable = (provider) => detectCapabilities()[provider];
+/* Every backend process that is stopped is waited for on exit: the discovery helpers, the session a switch
+   replaced, the current one. */
+const retiring = new Set(), discoveryAgents = new Set();
+function retire(agent) {
+  if (!agent) return;
+  const stopped = agent.stop();
+  retiring.add(stopped);
+  stopped.finally(() => retiring.delete(stopped));
+}
+async function discoverModels() {
+  if (discovering) return discovering;
+  discovering = Promise.all(["claude", "codex"].map(async provider => {
+    if (!providerAvailable(provider).available) { catalog[provider] = { models: [], error: providerAvailable(provider).reason }; return; }
+    const agent = makeSession({ provider, model: "", effort: null });
+    discoveryAgents.add(agent);
+    try {
+      if (provider === "codex") await agent.connect(); else await agent.start();
+      catalog[provider] = { models: curateModels(provider, agent.models || []), error: null };
+    } catch (e) { catalog[provider] = { models: [], error: e.message }; }
+    finally { discoveryAgents.delete(agent); retire(agent); }
+  })).then(() => { pushStatus(); return catalog; }).finally(() => { discovering = null; });
+  return discovering;
+}
+async function ensureSession() {
+  if (starting) return starting;
+  if (session?.running || quitting) return;
+  const available = providerAvailable(settings.provider);
+  if (!available.available) throw new Error(available.reason);
+  starting = (async () => {
+    if (!catalog[settings.provider].models.length) await discoverModels();
+    Object.assign(settings, selectModel(catalog, settings, {}));
+    const agent = makeSession({ ...settings });
+    session = agent;
+    try { await agent.start(state.sessionId); if (session === agent) pushStatus(); }
+    catch (e) { retire(agent); throw e; }
+  })().finally(() => { starting = null; });
+  return starting;
+}
+async function changeSettings(requested) {
+  if (state.busy || starting) throw new Error("Wait until the current request finishes before switching.");
+  const choice = selectModel(catalog, settings, requested, effortPreferences);
+  if (Object.keys(choice).every(k => choice[k] === settings[k])) return;
+  const changingProvider = choice.provider !== settings.provider;
+  if (changingProvider && !["summary", "fresh"].includes(requested.handover)) throw new Error("Choose whether to pass a summary or start fresh.");
+  const old = session;
+  // Codex owns a single writer per thread. Model/effort are turn parameters, so keep its writer.
+  const reuse = !changingProvider && choice.provider === "codex" && old?.running;
+  const candidate = reuse ? old : makeSession(choice);
+  state.busy = true; state.switching = true; pushStatus();
+  try {
+    if (!reuse) await candidate.start(changingProvider ? null : state.sessionId);
+    if (!candidate.running) throw new Error("The new backend stopped before it was ready.");
+    const summary = changingProvider && requested.handover === "summary" ? handoverSummary(state.chat) : "";
+    if (changingProvider && state.sessionId) state.sessionArchive.push({ provider: state.provider, id: state.sessionId });
+    const nextPreferences = { ...effortPreferences };
+    if (settings.effort) nextPreferences[`${settings.provider}:${settings.model}`] = settings.effort;
+    if (choice.effort) nextPreferences[`${choice.provider}:${choice.model}`] = choice.effort;
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileConfig, ...choice, effortPreferences: nextPreferences }, null, 2) + "\n");
+    effortPreferences = nextPreferences;
+    Object.assign(settings, choice);
+    state.provider = choice.provider;
+    if (changingProvider) { state.sessionId = candidate.sessionId || null; state.handover = summary; state.model = null; }
+    if (reuse) candidate.settings = choice;
+    session = candidate;
+    if (!reuse && candidate.initialEvent()) handleEvent(candidate.initialEvent());
+    if (!reuse) retire(old);
+    saveChat();
+    addEntry({ kind: "notice", text: changingProvider
+      ? `Switched to ${choice.provider === "codex" ? "OpenAI / ChatGPT" : "Claude"} · ${summary ? "Conversation summary will be shared" : "New conversation"}.`
+      : `Model: ${choice.model}${choice.effort ? ` · ${choice.effort} effort` : ""}. The conversation continues.` });
+  } catch (e) { if (session !== candidate) retire(candidate); throw e; }
+  finally { state.busy = false; state.switching = false; pushStatus(); }
 }
 
 function toolSummary(name, input = {}) {
@@ -533,6 +629,9 @@ function toolSummary(name, input = {}) {
     return !r || r.startsWith("..") ? path.basename(p) : r;
   };
   switch (name) {
+    case "pindeck_read": return { name: "Read", detail: base(input.path) };
+    case "pindeck_edit": case "pindeck_write": return { name: "Edit", detail: base(input.path) };
+    case "pindeck_command": return { name: input.command || "Command", detail: (input.args || []).join(" ") };
     case "Read": return { name: "Read", detail: base(input.file_path) };
     case "Edit": case "MultiEdit": case "Write": return { name: "Edit", detail: base(input.file_path) };
     case "Bash": {
@@ -578,14 +677,19 @@ function handleEvent(ev) {
 }
 
 function startTurn(promptText, userEntry) {
-  // every deck file as it is now: Claude may change any of them (not brand.css or vendor/), and undo
+  // every deck file as it is now: the assistant may change any of them (not brand.css or vendor/), and undo
   // takes back all it changed
   state.turn = { id: userEntry.id, before: snapshot([...EDITABLE, ...LOCKED]), scan: scanFiles(DECK_DIR) };
   state.busy = true;
   pushStatus();
-  ensureSession();
-  if (!session.running) return finishTurn({ error: detectCapabilities().claude.reason || "Claude Code could not be started." });
-  session.send([{ type: "text", text: promptText }]);
+  const turn = state.turn;
+  const context = state.handover ? state.handover + "\n\n" + promptText : promptText;
+  ensureSession().then(async () => {
+    if (state.turn !== turn || turn.cancelled) return;
+    const sendingSession = session;
+    await session.send([{ type: "text", text: context }]);
+    if (session === sendingSession) { state.handover = ""; saveChat(); }
+  }).catch(e => { if (state.turn === turn) finishTurn({ error: e.message }); });
 }
 
 function finishTurn({ error, cost, duration, denials = [] }) {
@@ -599,7 +703,7 @@ function finishTurn({ error, cost, duration, denials = [] }) {
     const now = readDeck(f);
     if (now === turn.before[f]) continue;
     if (turn.before[f] != null) writeDeck(f, turn.before[f]);
-    else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // a locked file that Claude created
+    else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // a locked file that the assistant created
     restored.push(f);
   }
   toolEntries.clear();
@@ -611,7 +715,7 @@ function finishTurn({ error, cost, duration, denials = [] }) {
   const order = (rel) => (EDITABLE.includes(rel) ? EDITABLE.indexOf(rel) : EDITABLE.length);
   const files = Object.keys(changed).sort((a, b) => order(a) - order(b) || a.localeCompare(b))
     .map((rel) => fileChange(rel, before[rel], after[rel]));
-  // after a hand-off: imported pictures that Claude replaced (nothing refers to them any more) are
+  // after a hand-off: imported pictures that the assistant replaced (nothing refers to them any more) are
   // deleted; undo brings them back with the turn
   const deletedFiles = [];
   for (const rel of turn.importedFiles || []) {
@@ -620,7 +724,7 @@ function finishTurn({ error, cost, duration, denials = [] }) {
     deletedFiles.push({ rel, data: fs.readFileSync(abs) });
     fs.rmSync(abs, { force: true });
   }
-  const t = { id: turn.id, kind: "claude", before, after, files, deletedFiles, undone: false };
+  const t = { id: turn.id, kind: "agent", provider: settings.provider, before, after, files, deletedFiles, undone: false };
   if (files.length) { state.turns.push(t); state.redo = []; }
   addEntry({ kind: "turn", turnId: files.length ? t.id : null, files, error, cost, duration,
     denials, restored, newIds: eid.assigned.length });
@@ -632,7 +736,7 @@ function finishTurn({ error, cost, duration, denials = [] }) {
 
 /* ---- Attachments: figures, audio and PDFs added to a chat message ------------------------------------
    Figures and audio go into <deck>/figures/ (paths relative to the deck). PDFs are reading material for
-   Claude (a paper, a report, a figure or table to take over) and stay outside the deck, in PDF_DIR
+   the assistant (a paper, a report, a figure or table to take over) and stay outside the deck, in PDF_DIR
    (absolute paths); `cli.mjs pdf-figure` renders a page or part of one into figures/ when it is needed. */
 const ATTACH_TYPES = {
   image: ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif"],
@@ -691,8 +795,8 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
 
 /* `cli.mjs pdf-figure <pdf> <page> [x,y,w,h] [figures/name.png] [--width px]`: renders a PDF page, or a box
    of it given as fractions of the page from the top left, to PNG. Without a figures/ name it goes to the
-   screenshots folder, for Claude to look at before choosing; with one, into the deck. */
-async function pdfFigure({ file = "", page = "1", box = "", out = "", width = "" }) {
+   screenshots folder, for the assistant to look at before choosing; with one, into the deck. */
+async function pdfFigure({ file = "", page = "1", box = "", out = "", width = "", cancelled = () => false }) {
   const bad = (t, status = 400) => ({ status, text: t });
   if (!CAPS.pdfPages.available) return bad(CAPS.pdfPages.reason, 501);
   const abs = [path.isAbsolute(file) ? file : path.join(DECK_DIR, file), path.join(PDF_DIR, path.basename(file))]
@@ -714,6 +818,7 @@ async function pdfFigure({ file = "", page = "1", box = "", out = "", width = ""
   await renderJobs(abs, [{ page: n, out: tmp, box: pts, scale }], STATE_DIR, { slideWidth: pw });
   if (!fs.existsSync(tmp)) return bad("The PDF page could not be rendered.", 500);
   const size = `${Math.round(pts[2] * scale)} × ${Math.round(pts[3] * scale)} px`;
+  if (cancelled()) return bad("The request was cancelled before the figure could be saved.", 409);
   if (!out) return { text: `${tmp} (${size}). Read it; add a figures/ name to save it into the deck.` };
   const buf = fs.readFileSync(tmp);
   fs.rmSync(tmp, { force: true });
@@ -826,7 +931,7 @@ function recordHandEdit(before, html, label, note, { manual = true, deletedFiles
     files: [{ file: DECK_FILE, added: d.added, removed: d.removed }], undone: false };
   state.turns.push(t);
   state.redo = [];
-  // chat: false keeps the edit out of the chat (it stays in the undo history and Claude is still told)
+  // chat: false keeps the edit out of the chat (it stays in the undo history and the assistant is still told)
   if (chat) addEntry({ kind: "edit", turnId: t.id, label, files: t.files });
   else state.seq++;   // keep turn ids unique: they share the counter with chat entries
   state.notes.push(note);
@@ -852,7 +957,7 @@ function deletePlan(eid) {
   return { ...target, html: rest, files };
 }
 
-/* ---- Undo (Claude's turns and hand edits share one history) ----------------------------------------
+/* ---- Undo (assistant turns and hand edits share one history) ---------------------------------------
    Undo puts back the files as they were before a change, Redo as they were after it. Both first check that
    every file they touch is exactly as that change left it (or, for Redo, as the undo left it): the editable
    files, and the pictures or audio files they would delete or bring back. Anything else means the files
@@ -881,7 +986,7 @@ function conflict(res, direction, files) {
       `it would overwrite those changes. Reload to see the files as they are.` });
 }
 function undo(res) {
-  if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
+  if (state.busy) return json(res, 409, { error: "Wait until the assistant has finished." });
   const t = liveTurns().at(-1);
   if (!t) return json(res, 409, { error: "Nothing to undo." });
   const diverged = undoConflicts(t, "undo");
@@ -971,7 +1076,7 @@ async function applyImport(imp, numbers, afterEid, refine = false) {
     missing: r.plans.flatMap((p) => p.figures.filter((f) => f.missing)).length };
 }
 
-/* The hand-off: Claude gets the slides the import could only approximate, each with a picture of the
+/* The hand-off: the assistant gets the slides the import could only approximate, each with a picture of the
    original slide, and improves them in the deck's style. Returns the number of slides handed over. */
 async function refineImport(imp, pdf, plans, eids, first) {
   const todo = plans.map((p, i) => ({ p, index: first + i, eid: eids[i] })).filter((x) => x.p.complex.length);
@@ -1182,11 +1287,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === "/api/message" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is still working." });
-      // checked again here: the claude command may have been installed (or removed) since the start
-      const claude = detectCapabilities().claude;
-      if (!claude.available) return json(res, 503, { code: "claude-unavailable", error: claude.reason });
+      if (state.busy) return json(res, 409, { error: "The assistant is still working." });
+      // checked again here: the claude or codex command may have been installed (or removed) since the start
+      const backend = providerAvailable(settings.provider);
+      if (!backend.available) return json(res, 503, { code: `${settings.provider}-unavailable`, error: backend.reason });
       const b = await body(req);
+      if (state.busy) return json(res, 409, { error: "The assistant is still working." });
       if (typeof b.text !== "string" || !b.text.trim()) return json(res, 400, { error: "Empty message." });
       // what the prompt reads from pins and the selection must be there
       const placed = (x) => x && typeof x.eid === "string" && x.slide && Number.isInteger(x.slide.index) && x.box;
@@ -1194,22 +1300,28 @@ const server = http.createServer(async (req, res) => {
       if (!placed(b.selection)) b.selection = null;
       if (!Array.isArray(b.layouts)) b.layouts = [];
       if (b.current && !Number.isInteger(b.current.index)) b.current = null;
-      let screenshot = null;
-      const shotSlide = typeof b.screenshot === "object" && b.screenshot?.eid ? b.screenshot : b.screenshot ? b.current : null;
-      if (shotSlide) {
-        try { screenshot = { slide: shotSlide.index + 1, path: await takeShot(shotSlide) }; }
-        catch (e) { addEntry({ kind: "notice", text: "Screenshot failed: " + e.message }); }
-      }
-      const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
-      // only files PinDeck itself stored can be attached
-      b.attachments = (b.attachments || []).filter((a) => a && state.uploads.has(a.path) && fs.existsSync(uploadFile(a.path)));
-      b.attachments.forEach((a) => { state.uploads.delete(a.path); if (a.waveform) state.uploads.delete(a.waveform); });
-      const entry = addEntry({ kind: "user", text: b.text, screenshot: !!screenshot,
-        attachments: b.attachments.map((a) => ({ path: a.path, kind: a.kind, name: a.name })),
-        selection: b.selection ? { eid: b.selection.eid, label: b.selection.eid.replace(/^[^/]+\//, ""), slide: b.selection.slide.index + 1 } : null,
-        pins: (b.pins || []).map((p) => ({ n: p.n, eid: p.eid, label: label(p), slide: p.slide.index + 1 })) });
-      startTurn(buildPrompt({ ...b, screenshot }), entry);
-      return json(res, 200, { id: entry.id });
+      const preparation = { cancelled: false };
+      state.preparing = preparation;
+      state.busy = true; pushStatus();
+      try {
+        let screenshot = null;
+        const shotSlide = typeof b.screenshot === "object" && b.screenshot?.eid ? b.screenshot : b.screenshot ? b.current : null;
+        if (shotSlide) {
+          try { screenshot = { slide: shotSlide.index + 1, path: await takeShot(shotSlide) }; }
+          catch (e) { addEntry({ kind: "notice", text: "Screenshot failed: " + e.message }); }
+        }
+        if (preparation.cancelled) return json(res, 409, { error: "Stopped before sending the message." });
+        const label = (p) => (p.tag?.startsWith("footer") ? "footer" : p.eid === p.slide.eid ? "slide" : p.eid.replace(/^[^/]+\//, ""));
+        // only files PinDeck itself stored can be attached
+        b.attachments = (b.attachments || []).filter((a) => a && state.uploads.has(a.path) && fs.existsSync(uploadFile(a.path)));
+        b.attachments.forEach((a) => { state.uploads.delete(a.path); if (a.waveform) state.uploads.delete(a.waveform); });
+        const entry = addEntry({ kind: "user", text: b.text, screenshot: !!screenshot,
+          attachments: b.attachments.map((a) => ({ path: a.path, kind: a.kind, name: a.name })),
+          selection: b.selection ? { eid: b.selection.eid, label: b.selection.eid.replace(/^[^/]+\//, ""), slide: b.selection.slide.index + 1 } : null,
+          pins: (b.pins || []).map((p) => ({ n: p.n, eid: p.eid, label: label(p), slide: p.slide.index + 1 })) });
+        startTurn(buildPrompt({ ...b, screenshot }), entry);
+        return json(res, 200, { id: entry.id });
+      } finally { state.preparing = null; if (!state.turn) { state.busy = false; pushStatus(); } }
     }
     if (p === "/api/upload" && req.method === "POST") {
       const original = decodeURIComponent(String(req.headers["x-filename"] || "file"));
@@ -1247,22 +1359,15 @@ const server = http.createServer(async (req, res) => {
       }
       return json(res, 200, {});
     }
+    if (p === "/api/models" && req.method === "GET") return json(res, 200, await discoverModels());
     if (p === "/api/settings" && req.method === "POST") {
       const b = await body(req);
-      const model = b.model ?? settings.model, effort = b.effort ?? settings.effort;
-      if (!MODELS.includes(model) || !EFFORTS.includes(effort)) return json(res, 400, { error: "Unknown model or effort." });
-      if (model === settings.model && effort === settings.effort) return json(res, 200, { settings });
-      if (state.busy) return json(res, 409, { error: "Wait until Claude has finished, then change the model or effort." });
-      Object.assign(settings, { model, effort });
-      saveSettings();
-      // restart the session with the new flags; --resume keeps the conversation
-      if (session.running) session.stop().then(() => { if (!quitting) ensureSession(); });
-      addEntry({ kind: "notice", text: `Model: ${model[0].toUpperCase() + model.slice(1)}, effort: ${effort}. The conversation continues.` });
-      pushStatus();
-      return json(res, 200, { settings });
+      if (state.busy || starting) return json(res, 409, { error: "Wait until the current request finishes before switching." });
+      try { await changeSettings(b); return json(res, 200, { settings }); }
+      catch (e) { return json(res, 400, { error: e.message }); }
     }
     if (p === "/api/slide-hidden" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1278,7 +1383,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId, index });
     }
     if (p === "/api/move-slide" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1291,7 +1396,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId, index: r.index });
     }
     if (p === "/api/add-slide" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       if (!["content", "section", "duplicate"].includes(b.kind)) return json(res, 400, { error: "Unknown slide kind." });
@@ -1321,7 +1426,7 @@ const server = http.createServer(async (req, res) => {
       let imp;
       try { imp = startImport(name, Buffer.concat(chunks)); }
       catch (e) { return json(res, 400, { error: `${name} could not be read: ${e.message}` }); }
-      // what the import can only approximate, so the dialog can offer Claude's help with it
+      // what the import can only approximate, so the dialog can offer the assistant's help with it
       const complex = new Map(planSlides(imp.model, imp.model.slides.map((s) => s.n), { drawings: renderAvailable() }).map((p) => [p.n, p.complex]));
       return json(res, 200, { id: imp.id, name, render: renderAvailable(),
         slides: imp.model.slides.map((s) => ({ n: s.n, title: s.title, subtitle: s.subtitle, hidden: s.hidden, kind: s.kind, complex: complex.get(s.n) || [] })) });
@@ -1332,7 +1437,7 @@ const server = http.createServer(async (req, res) => {
       return serveFile(res, path.join(imp.dir, `thumb-${n}.png`));
     }
     if (p === "/api/import-apply" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const imp = lastImport;
@@ -1343,21 +1448,25 @@ const server = http.createServer(async (req, res) => {
       catch (e) { console.error(e); return json(res, 500, { error: String(e.message || e) }); }
     }
     if (p === "/api/stop" && req.method === "POST") {
-      if (state.busy && session.running) {
+      if (state.preparing) { state.preparing.cancelled = true; return json(res, 200, {}); }
+      if (state.busy && state.turn) {
         const interruptedTurn = state.turn;
-        session.interrupt();
+        interruptedTurn.cancelled = true;
+        if (starting || !session?.running) { session?.stop(); finishTurn({ error: "Stopped." }); return json(res, 200, {}); }
+        Promise.resolve(session.interrupt()).catch(() => {});
         setTimeout(() => {
-          if (state.busy && state.turn === interruptedTurn) session.stop();
+          if (state.busy && state.turn === interruptedTurn) { session?.stop(); finishTurn({ error: "Stopped." }); }
         }, 5000); // force only if the interrupted turn does not answer
       }
       return json(res, 200, {});
     }
     if (p === "/api/new-chat" && req.method === "POST") {
-      session.stop();
-      Object.assign(state, { chat: [], sessionId: null, turns: [], redo: [], turn: null, busy: false, notes: [] });
+      if (state.busy || starting) return json(res, 409, { error: "Stop the current request before starting a new chat." });
+      session?.stop();
+      Object.assign(state, { chat: [], sessionId: null, handover: "", turns: [], redo: [], turn: null, busy: false, notes: [] });
       saveChat();
       broadcast("reset", { chat: [] });
-      ensureSession();
+      ensureSession().catch(e => addEntry({ kind: "notice", text: e.message }));
       pushStatus();
       return json(res, 200, {});
     }
@@ -1374,7 +1483,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/undo" && req.method === "POST") return undo(res);
     if (p === "/api/redo" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
+      if (state.busy) return json(res, 409, { error: "Wait until the assistant has finished." });
       const t = state.redo.at(-1);
       if (!t) return json(res, 409, { error: "Nothing to redo." });
       const diverged = undoConflicts(t, "redo");
@@ -1398,7 +1507,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { eid: plan.eid, tag: plan.tag, files: plan.files });
     }
     if (p === "/api/delete" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const plan = deletePlan(b.eid);
@@ -1418,7 +1527,7 @@ const server = http.createServer(async (req, res) => {
 
     // Hand edits from the editor: drag/resize (inline styles) and text
     if (p === "/api/edit" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1440,7 +1549,7 @@ const server = http.createServer(async (req, res) => {
       return n ? json(res, 200, n) : json(res, 404, { error: "Slide not found in the file." });
     }
     if (p === "/api/notes" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1455,7 +1564,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId });
     }
     if (p === "/api/text" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1471,7 +1580,7 @@ const server = http.createServer(async (req, res) => {
 
     // Enter in a bullet: the bullet keeps the text before the caret, a new bullet after it gets the rest
     if (p === "/api/split" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1484,7 +1593,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId, eid: r2.eid });
     }
     if (p === "/api/remove" && req.method === "POST") {
-      if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
+      if (state.busy) return json(res, 409, { error: "The assistant is working. Wait until it has finished." });
       const b = await body(req);
       if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
@@ -1501,7 +1610,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return json(res, e.status || 500, { error: String(e.message || e) }); }
     }
 
-    // CLI endpoints (used by Claude Code via cli.mjs)
+    // CLI endpoints (used by both backends via cli.mjs)
     if (p === "/api/pdf") {
       const kind = url.searchParams.get("slide") || url.searchParams.get("kind") || "handout";
       if (!["handout", "presentation"].includes(kind)) return text(res, 400, 'Use "handout" or "presentation".');
@@ -1510,7 +1619,8 @@ const server = http.createServer(async (req, res) => {
       return text(res, 200, r.path);
     }
     if (p === "/api/pdf-figure") {
-      const r = await pdfFigure(Object.fromEntries(url.searchParams));
+      const turn = state.turn;
+      const r = await pdfFigure({ ...Object.fromEntries(url.searchParams), cancelled: () => !!turn && (turn.cancelled || state.turn !== turn) });
       return text(res, r.status || 200, r.text);
     }
     if (p === "/api/slides") {
@@ -1553,7 +1663,6 @@ server.listen(PORT, "127.0.0.1", () => {
   ORIGIN = `http://127.0.0.1:${PORT}`;
   try {
     writeServerInfo();
-    completeSettings();
     fs.rmSync(IMPORT_DIR, { recursive: true, force: true });
     const first = runEidPass();
     if (first.changed) console.log(`Added ${first.assigned.length} element ids to ${DECK_FILE} (backup in ${path.join(STATE_DIR, "backups")}).`);
@@ -1570,9 +1679,16 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`Server: ${CAPS.label}`);
   for (const [name, c] of Object.entries(publicCapabilities(CAPS)))
     if (c && c.available === false) console.log(`  ${name}: off (${c.reason})`);
-  ensureSession();
+  discoverModels().then(() => {
+    if (!settings.model) {
+      const models = catalog[settings.provider].models;
+      const first = models.find(m => m.isDefault) || models[0];
+      if (first) { settings.model = first.id; settings.effort = first.defaultEffort; }
+    }
+    pushStatus();
+  });
 });
-/* Ctrl+C or SIGTERM: stop taking requests, let Claude Code end (it gets end of input, then SIGTERM, then
+/* Ctrl+C or SIGTERM: stop taking requests, let the backend end (it gets end of input, then SIGTERM, then
    SIGKILL), then exit. At most 6 s; a second Ctrl+C exits at once. A running turn is not resumed later. */
 async function quit() {
   if (quitting) process.exit(1);
@@ -1584,7 +1700,8 @@ async function quit() {
   server.close();
   server.closeAllConnections?.();
   removeServerInfo();
-  await Promise.race([session.stop(), new Promise((r) => setTimeout(r, 6000))]);
+  for (const agent of [...discoveryAgents, session]) retire(agent);
+  await Promise.race([Promise.all(retiring), new Promise((r) => setTimeout(r, 6000))]);
   if (chatTimer) writeChat();
   process.exit(0);
 }

@@ -1,12 +1,13 @@
 # PinDeck
 
-> **macOS, and Linux as a beta.** On Linux, PinDeck runs as a headless server that you use from your
-> Mac's browser through an SSH tunnel (see [Running on a Linux server](#running-on-a-linux-server-beta)).
-> Windows is not supported.
+> **macOS, and Linux as a beta · Version 3 beta preview** (`3.0.0-beta.1`). On Linux, PinDeck runs as a
+> headless server that you use from your Mac's browser through an SSH tunnel (see
+> [Running on a Linux server](#running-on-a-linux-server-beta)). Windows is not supported. The beta uses
+> npm’s `beta` channel; stable releases use `latest`. See availability and installation below.
 
 **Pin it. Say it. Done.** PinDeck is a local editor for HTML slide decks (reveal.js): the slides on
-the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
-pin them, write what to change, and Claude edits the HTML and CSS. The slide updates in place.
+the left, the slide in the middle, and a chat with Claude Code or OpenAI Codex on the right. You click elements to
+pin them, write what to change, and the selected assistant edits the HTML and CSS. The slide updates in place.
 
 ![PinDeck: the slide list, slide 10 of the example deck with two numbered pins, and the chat with Claude's answer to an earlier request and a new one being typed](docs/pindeck.png)
 
@@ -16,45 +17,89 @@ checked the layout; the next request, still being typed, refers to the new pins 
 ## What it does
 
 * **Point instead of describe.** Pins name the exact element, word or table cell; "make 2 match 1"
-  is enough. Claude also gets the measured layout of the slide, so it sees overlaps and overflow
+  is enough. The assistant also gets the measured layout of the slide, so it sees overlaps and overflow
   without screenshots.
 * **Edit by hand, too.** Move, resize and nudge elements with snapping, edit text in place (math stays
   TeX), write speaker notes, add, hide, move and delete slides. One undo history covers your edits and
-  Claude's.
-* **Stay on brand.** `brand.css` is locked: Claude edits the deck, its styles and other files of the deck
-  folder, never `brand.css` or `vendor/`, and checks its own work with PinDeck's layout command.
+  the assistant's.
+* **Stay on brand.** `brand.css` is locked: the assistant edits the deck, its styles and other files of the
+  deck folder, never `brand.css` or `vendor/`, and checks its own work with PinDeck's layout command.
 * **Bring material in.** Attach figures, audio and PDFs to a message, or import slides from PowerPoint
   into the deck's own layouts.
 * **Get it out.** Present from the browser, or export a handout or presentation PDF.
-* **Local and small.** One Node process on 127.0.0.1, no npm dependencies, your normal Claude login.
+* **Local and small.** One Node process on 127.0.0.1, no npm dependencies, your existing Claude Code or Codex login.
 
 ## Quick start
 
 Runs on macOS, and on Linux as a beta. The npm package declares `"os": ["darwin", "linux"]`, so normal
 npm installation rejects other operating systems. Overriding that check does not make those platforms
 supported. Running the server from a cloned repository on another OS shows a local support notice
-instead of opening the deck or starting Claude.
+instead of opening the deck or starting a backend.
+
+Install the public beta once `3.0.0-beta.1` has been published:
 
 ```bash
-npx pindeck path/to/deck        # from npm
-
-git clone https://github.com/ehabets/PinDeck.git && cd PinDeck
-node server.mjs ocean-example   # or from source, with the example deck in this repository
+npx pindeck@beta /path/to/deck
+# Or select this exact beta:
+npx pindeck@3.0.0-beta.1 /path/to/deck
 ```
 
+For the source preview, once the `v3-beta` branch is public:
+
+```bash
+git clone --branch v3-beta --single-branch https://github.com/ehabets/PinDeck.git PinDeck-v3
+cd PinDeck-v3
+node server.mjs ocean-example
+```
+
+**Availability:** this checkout contains the prepared beta; its branch and npm package have not yet
+been published. Until then, run `node server.mjs ocean-example` from your local v3 checkout.
+
+Use `npx pindeck@latest /path/to/deck` for the stable release. The beta channel does not replace it.
+The example deck is included in the repository; npm users supply their own deck.
+
 Then open the login link PinDeck prints (`PinDeck: http://127.0.0.1:5180/login?code=...`). It works
-once and logs this browser in; for a new one, run `pindeck login` (or `node server.mjs login`). Requirements: Node 20 or later and the `claude` CLI, signed in
-with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
-screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import; on
-Linux, Poppler, LibreOffice and ffmpeg (see [Running on a Linux server](#running-on-a-linux-server-beta)).
+once and logs this browser in; for a new one, run `pindeck login` (or `node server.mjs login`).
 
 The deck is a file (`pindeck path/to/talk.html`) or a folder, which opens its `index.html`; without
 one, the current folder. Several decks can share a folder, each with its own chat and undo history;
-they share the folder's `theme.css` and `brand.css`, and Claude edits only the deck that is open.
+they share the folder's `theme.css` and `brand.css`, and the assistant edits only the deck that is open.
 PinDeck adds element ids to the deck file when it opens it (see below), so try it on a copy of a deck
-first. Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
-`~/.pindeck/config.json`), `--help`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck/` (change with
+first. Options: `--port 5180`, `--provider claude|codex`, `--model <name>` (for this run only; otherwise the
+model in `~/.pindeck-v3/config.json`), `--asset-root <folder>` (see [Files outside the deck folder](#files-outside-the-deck-folder)),
+`--help`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck-v3/` (change with
 `PINDECK_HOME`), not in the deck. `ocean-example/` is a complete example deck to start from.
+
+## Compatibility and requirements
+
+* **Runtime:** Node.js 20 or later, plus a modern browser. The release workflow uses Node.js 24.
+* **Backends:** install and sign in to Claude Code (`claude auth login`) or OpenAI Codex (`codex login`).
+  The corresponding executable must be on `PATH`; `CLAUDE_BIN` and `CODEX_BIN` can override its path.
+  Only the selected backend is required for editing. Model and effort availability comes from that
+  backend and account, and may differ from the provider’s website or desktop app.
+* **Platforms:** macOS, and Linux as a beta (see [Running on a Linux server](#running-on-a-linux-server-beta)).
+  Windows is not supported. The npm package declares `"os": ["darwin", "linux"]`, so normal npm
+  installation rejects other operating systems. This check can be overridden; bypassing it does not make
+  those platforms supported. Source launches on unsupported platforms show a local support page without
+  opening the deck or starting a backend. Native Windows support is a possible v4 feature, not part of this beta.
+* **Screenshots and PDF export:** require Chrome, Chromium, Edge or Brave where the server runs.
+* **PDF input through Codex:** pages are rendered with macOS PDFKit, or Poppler on Linux. Page-text
+  extraction uses `osascript` and is macOS-only; on Linux Codex reads the rendered page image. Claude uses
+  its native PDF-reading capabilities.
+* **PowerPoint import:** basic `.pptx` parsing uses Node.js; rendered slide pictures require
+  PowerPoint or Keynote on macOS, or LibreOffice and Poppler on Linux.
+* **Linux tools:** Poppler, LibreOffice and ffmpeg, each optional; features that need a missing one are
+  switched off with the reason shown in the editor.
+
+The initial live editing checks used Codex CLI **0.144.1** and Claude Code **2.1.289**.
+Further live checks on macOS passed with Codex CLI **0.162.1** and Claude Code **2.1.301**:
+editing, Claude effort changes, Codex model changes, conversation handover, undo/redo,
+cancellation and recovery. These are tested versions, not guaranteed minimum requirements. Backends must support the discovery and session interfaces
+used by PinDeck. Older CLIs can expose fewer models or fail initialization.
+
+Codex integration uses OpenAI’s experimental `dynamicTools` extension to the app-server.
+A future Codex update may require a PinDeck adapter update. Incompatible backends report startup
+errors; PinDeck does not fall back to broader permissions. Recheck backend compatibility when upgrading.
 
 ## Preparing a deck
 
@@ -71,7 +116,7 @@ the example's `deck.js` does for the footer), count only slides without that att
 numbers will jump where a slide is hidden.
 
 Without them PinDeck runs no footer check and locks only `.slide-foot` and `.logo`. A file called
-`brand.css` in the deck folder is locked for Claude. See `ocean-example/` for a complete deck.
+`brand.css` in the deck folder is locked for both backends. See `ocean-example/` for a complete deck.
 
 ## Making your own template
 
@@ -82,30 +127,31 @@ cp -R ocean-example my-template
 ```
 
 1. **Brand in `brand.css`:** palette, backgrounds, footer and logo positions. PinDeck locks this file
-   for Claude, so edit it by hand (or with Claude Code outside PinDeck). Replace the logos in
+   for both backends, so edit it by hand outside PinDeck. Replace the logos in
    `assets/` too.
 2. **Everything else in `theme.css`:** type sizes, spacing, layouts and components. This can be done
-   in PinDeck with Claude.
+   in PinDeck with the selected assistant.
 3. **`index.html`:** the footer text in the `data-` attributes of `<div class="reveal">`, and the
    `pindeck:footer-top` and `pindeck:locked` meta tags if the footer or the brand elements move.
    `deck.js` holds the math macros, the footer markup and the audio player.
-4. **`README.md` and `CLAUDE.md`:** Claude follows both, so describe the new classes and rules there.
+4. **`README.md`, `CLAUDE.md` and `AGENTS.md`:** both backends follow the deck's `CLAUDE.md` and
+   `AGENTS.md`, so describe the new classes and rules there; the assistant can read `README.md` for details.
    Refer to PinDeck's commands as "the PinDeck CLI command given in the system prompt", as the
-   example's `CLAUDE.md` does; PinDeck tells Claude the right path wherever the deck is. An older
+   example's `CLAUDE.md` does; PinDeck tells the assistant the right path wherever the deck is. An older
    `node ../cli.mjs` in a deck's `CLAUDE.md` is replaced with that command.
 
-**Instructions for Claude.** PinDeck gives Claude the deck folder's own `CLAUDE.md` and `AGENTS.md`.
-It does not load `CLAUDE.md` files from parent folders, as Claude Code does in a terminal: those are
-usually written for coding (run the tests, commit), which PinDeck's Claude cannot do; they would change
-with where the deck happens to sit; and on a shared server a parent folder may be writable by others.
-To share rules between decks, say so in the deck's own file, in one of two ways:
+**Instructions for the assistant.** PinDeck gives both backends the deck folder's own `CLAUDE.md` and
+`AGENTS.md`. It does not load such files from parent folders, as Claude Code and Codex do in a terminal:
+those are usually written for coding (run the tests, commit), which PinDeck's assistant cannot do; they
+would change with where the deck happens to sit; and on a shared server a parent folder may be writable
+by others. To share rules between decks, say so in the deck's own file, in one of two ways:
 
 - **Import:** `Follow @../shared/STYLE.md for wording.` includes that file's text. Paths are relative to
   the file they are in (or absolute, or `~/...`); imported files may import others, up to 5 levels,
   each file once, 200 KB in all. Only text files are imported; an e-mail address, an `@name` that is
   not a file, and anything in code are left as written.
-- **Pointer:** `The style rules are in ../shared/STYLE.md; read them first.` Claude reads the file when
-  it needs it.
+- **Pointer:** `The style rules are in ../shared/STYLE.md; read them first.` The assistant reads the file
+  when it needs it.
 
 **New slide** and the PowerPoint import model new slides on the deck's own: keep a slide with class
 `title-slide`, one with `section-slide`, and a content slide with `.slide-head` (`h2`, optionally a
@@ -114,20 +160,73 @@ and imported audio copies the first `.demo-row` (with a `data-target`). Without 
 slide, those PowerPoint slides are imported as content slides; without a `.demo-row`, audio gets
 plain players.
 
-## Configuration
+## Models, providers and configuration
 
-`~/.pindeck/config.json` (or `$PINDECK_HOME/config.json`) is created on first start:
+Open the existing model menu in the chat header to choose a model under **Claude** or
+**OpenAI / ChatGPT**. Choices come from the installed backends: Claude's initialization response
+and Codex's paginated `model/list`. Hidden or explicitly unavailable entries are omitted. Effort
+choices appear in a separate reasoning-effort selector beside the model and follow its reported
+capabilities. Readable labels preserve the exact backend values (for example, Extra high sends `xhigh`).
+The selector shows provider descriptions where available and distinguishes **Model default** from a
+**PinDeck default** fallback. Models without effort controls show a disabled Effort N/A selector.
+Effort choices are remembered per provider/model in `effortPreferences` in config.json. A model with
+no saved choice uses its default; an unsupported saved choice falls back to the current default.
+The picker defaults to GPT-6 models (including 6.x) and the newest discovered Fable, Opus, Sonnet,
+and Haiku model in each family. Claude versions are compared numerically from discovered names;
+a rolling family alias wins ties, avoiding duplicate entries. **Show all available models** reveals
+the full discovered catalog; this display preference is remembered in the browser. A currently selected
+older model remains visible and is never switched automatically by the filter.
+**Refresh models** retries discovery. A missing CLI, missing sign-in, or discovery failure is shown in its provider group.
+These are backend-reported choices, not a guarantee of current quota or entitlement; a later rejected
+request reports its error. Older CLIs may expose fewer models than a provider's website.
+
+Changing models within a provider resumes that provider's conversation. Changing providers opens
+**Switch with summary**, **Start fresh**, and **Cancel**. A switch prepares the new backend before
+replacing the old one. Chat remains visible with a divider, and deck files and undo/redo are retained.
+Switching back to a provider creates another new session; it does not silently restore old context.
+
+The current handover is a local, bounded digest of recent user/assistant messages and notices, not an
+additional model-generated summary. It excludes tool output, needs no extra inference request, and is
+sent with the first message to the new session. Earlier messages may be omitted. **Start fresh** sends
+no conversation digest; the assistant still receives PinDeck instructions and the current deck context.
+
+Settings are saved when changed in `~/.pindeck-v3/config.json` (or `$PINDECK_HOME/config.json`):
 
 ```json
 {
+  "provider": "claude",
   "model": "sonnet",
   "effort": "medium"
 }
 ```
 
-`model` is `opus` or `sonnet`; `effort` is `low`, `medium`, `high`, `xhigh` or `max`. A choice in the
-chat header's menu is written to this file, so it always shows what PinDeck uses. Edit it while
-PinDeck is stopped, or simply use the menu.
+Legacy configuration without `provider` is interpreted as Claude. Unsupported effort choices are
+adjusted to the discovered model's default when starting. Provider-tagged chat/session records prevent
+one backend from resuming the other's IDs. `--provider` and `--model` override startup settings for
+that run; a later menu selection is saved. `CLAUDE_BIN` and `CODEX_BIN` override executable paths.
+
+The v3 preview defaults to **`~/.pindeck-v3`**, keeping v2 settings and conversations separate. It does
+not copy the v2 directory automatically. To run both versions at once, use another port, for example:
+
+```bash
+node server.mjs /path/to/a/deck-copy --port 5183 --provider codex
+```
+
+## Backend permissions and attachments
+
+Claude uses its native Read/Edit tools with PinDeck's narrow allowlist, safe mode, and no inherited
+MCP configuration. Codex runs with a read-only sandbox, command execution disabled, and no approval
+grants. Inherited MCP servers and plugins are disabled in the thread configuration. Codex receives
+three host-controlled tools: `pindeck_read`, `pindeck_edit`, and `pindeck_command`.
+Only `index.html` and `theme.css` can be edited. Linked writable files and paths outside the allowed
+roots are rejected. Commands are restricted to PinDeck's layout, shot, slides, pdf and pdf-figure
+helpers, executed with argument arrays rather than a shell. `brand.css` also retains the server's
+post-turn restoration safeguard.
+
+Codex reads text, PNG/JPEG/WebP/GIF images and screenshots through the bridge. SVG is read as text.
+Attached PDFs are handled page by page using PDFKit on macOS: extracted text plus a rendered page image.
+PDF reading/rendering through this bridge is currently macOS-only. Audio is embedded by path and is
+not transcribed. Read operations have a 12 MB limit; long text can be read in chunks.
 
 ### Files outside the deck folder
 
@@ -144,11 +243,11 @@ library folder, add the folder it points to as an asset root; it does not have t
 ## Running on a Linux server (beta)
 
 PinDeck can run on a Linux machine where the deck lives, with the editor in your Mac's browser. The
-deck, PinDeck, Claude Code and the deck's git clone all stay on the server; the browser only shows the
+deck, PinDeck, the backend (Claude Code or Codex) and the deck's git clone all stay on the server; the browser only shows the
 editor. The server listens on 127.0.0.1 there, as on a Mac, and an SSH tunnel brings that port to your Mac.
 
 On the server you need Node 20 or later (22 or 24 recommended), git if the deck is in a repository, and
-the `claude` CLI installed and logged in under your account there, if you want the chat. Without it,
+the `claude` or `codex` CLI installed and logged in under your account there, if you want the chat. Without one,
 editing by hand still works. Then, in one SSH session on the server:
 
 ```bash
@@ -172,7 +271,7 @@ Other users of a shared server cannot open the editor or read the deck through P
 protects it is only in your browser's cookie and in PinDeck's own files in `~/.pindeck` (readable only by
 you), never in a page or on a command line.
 
-What works on Linux in this beta: editing by hand, speaker notes, slides, pins, the chat with Claude,
+What works on Linux in this beta: editing by hand, speaker notes, slides, pins, the chat with Claude or Codex,
 Undo/Redo, live reload when files change on the server, layout checks, attaching figures, audio and
 PDFs, `git-setup` and the PowerPoint import. Some features use programs on the server, and are on when
 they are installed (on Debian or Ubuntu: `sudo apt install poppler-utils libreoffice-impress ffmpeg`):
@@ -184,14 +283,14 @@ they are installed (on Debian or Ubuntu: `sudo apt install poppler-utils libreof
 | Pictures of PowerPoint slides in the import (thumbnails, diagrams) | LibreOffice (`soffice`) and Poppler |
 | Waveforms of audio other than WAV in the import | ffmpeg |
 
-Without them the editor says what is missing (hover over "Server: Linux (beta)"), and Claude is told
+Without them the editor says what is missing (hover over "Server: Linux (beta)"), and the assistant is told
 which commands are not available. LibreOffice may draw some slides a little differently from PowerPoint;
 the pictures are references and figures, the slides themselves are rebuilt from the file. Chromium from snap may not be
-allowed to use hidden folders in your home folder such as `~/.pindeck`; if screenshots fail with it, set
+allowed to use hidden folders in your home folder such as `~/.pindeck-v3`; if screenshots fail with it, set
 `PINDECK_HOME` to a folder that is not hidden, or install Chrome or Chromium from a package.
 
-Run one PinDeck per deck. While PinDeck or Claude is working on a deck, do not edit it with other tools
-or switch git branches at the same time. Stop first, or wait until Claude has finished. PinDeck notices
+Run one PinDeck per deck. While PinDeck or the assistant is working on a deck, do not edit it with other tools
+or switch git branches at the same time. Stop first, or wait until the assistant has finished. PinDeck notices
 changes made by other programs and reloads, and it refuses Undo, Redo or an edit that would overwrite
 them. Its checks cannot rule out every race with a program that writes at the same moment.
 
@@ -205,7 +304,7 @@ node cli.mjs git-setup path/to/deck
 
 This adds a line like `path/to/deck/*.html filter=pindeck-ids` to `.gitattributes` (commit it) and
 defines the filter in the clone's git config: git then strips the ids whenever it reads the deck's
-HTML. The ids stay in the file on disk, where PinDeck and Claude need them, but commits and diffs
+HTML. The ids stay in the file on disk, where PinDeck and the assistant need them, but commits and diffs
 never contain them, and a change that only adds ids does not show in `git status`. Your own edits
 show and commit as usual. Clones without the filter configured simply see the file as it is.
 
@@ -215,24 +314,24 @@ show and commit as usual. Clones without the filter configured simply see the fi
 |---|---|
 | Select, move, resize | Select mode (`V`, the default): click an element to select it, drag to move, pull a handle to resize. Elements snap to the slide edges and centre, the footer rule and other elements (pink guides); hold `Alt` to turn snapping off, `Shift` to move along one axis. Images keep their aspect ratio (`Shift` toggles). Arrow keys nudge by 1 px, `Shift`+arrows by 10 px. `Delete` removes the selected element after a confirmation; a picture goes with its caption, and files nothing else in the deck uses can be deleted with it. `⌘Z` brings both back. |
 | Edit text | Double-click the text (or select it and press `Enter`). The element shows its source, so math appears as TeX, e.g. `\(\mu=0.5\)`. `Enter` or a click elsewhere saves, `Esc` cancels, `Shift+Enter` adds a line break, `⌘B` / `⌘I` make text bold or italic. In a bullet, `Enter` splits it at the cursor and continues in a new bullet below; `Enter` on an empty new bullet removes it and stops. Pasted text arrives as plain text. Table cells are edited one at a time. |
-| Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and Claude's changes. |
+| Undo, redo | `⌘Z` / `⇧⌘Z` or the toolbar arrows. One history for your hand edits and the assistant's changes. |
 | Pin elements | Press `P` (or the Pin button), click elements; each click gets a number. Click a marker to remove it, `Esc` to stop. |
-| Ask Claude | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". The selected element is sent too, so "make this smaller" works. `Enter` sends, `Shift+Enter` adds a new line. |
+| Ask the assistant | Write in the sidebar and refer to pins by number: "1: align with 2, make 3 smaller". The selected element is sent too, so "make this smaller" works. `Enter` sends, `Shift+Enter` adds a new line. |
 | Visual questions | **+** in the chat, then **Screenshot**: the current slide with its pin markers is attached when you send. |
 | Review | Each answer ends with the changed files, a **Diff** button and an **Undo** button (most recent change). |
-| Stop | **Stop** interrupts Claude; the conversation continues. **New chat** starts over. |
+| Stop | **Stop** interrupts the assistant; the conversation continues. **New chat** starts over. |
 | New slide | **＋ New slide** above the slide list: a **content slide** (title and bullets), a **section divider**, or a **duplicate** of the current slide. It is added after the current slide, modelled on the deck's own slides, and its title opens for typing. |
-| Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts, and Claude can improve the complex ones; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
+| Import from PowerPoint | **＋ New slide** → **Import from PowerPoint…**, then choose a `.pptx` file and tick the slides you want (hidden PowerPoint slides start unticked). They are added after the current slide in this deck's own layouts, and the assistant can improve the complex ones; see [PowerPoint import](#powerpoint-import). `⌘Z` removes them again, with their figures. |
 | Speaker notes | The **Notes** field under the slide shows the current slide's notes (the speaker view, `S`, shows them when presenting). Type to change them; they are saved when you click elsewhere or press `⌘Enter`, and `Esc` puts back what was there. A slide without notes gets them; emptying the field removes them. Notes with formatting other than line breaks are edited as HTML. Drag the line above the notes to give them more or less room (double-click it for the default size); collapse them with their header. |
 | Move a slide | Drag it up or down in the slide list; an orange line shows where it will go. It moves with its notes and the comment above it, and `⌘Z` puts it back. Slides inside vertical stacks cannot be moved yet. |
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
-| Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
-| Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
-| Attach a PDF | The same way: a figure or table to take over, or a paper or report with more details. PDFs stay outside the deck (in `~/.pindeck`); Claude reads them, rebuilds tables as HTML, and renders a figure (a page or a cropped part of one) into `<deck>/figures/` as PNG with `cli.mjs pdf-figure` (macOS, or Linux with Poppler). E.g. "put Fig. 3 of this paper on slide 7" or "add the results of Table 2 to slide 9". |
+| Model and effort | Choose a discovered Claude or OpenAI model in the chat header, then use the separate reasoning-effort selector. Provider changes offer an optional handover; same-provider changes continue the conversation. The choice is saved in `~/.pindeck-v3/config.json`. |
+| Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask the assistant, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
+| Attach a PDF | The same way: a figure or table to take over, or a paper or report with more details. PDFs stay outside the deck (in `~/.pindeck-v3`); the assistant reads them, rebuilds tables as HTML, and renders a figure (a page or a cropped part of one) into `<deck>/figures/` as PNG with `cli.mjs pdf-figure` (macOS, or Linux with Poppler). E.g. "put Fig. 3 of this paper on slide 7" or "add the results of Table 2 to slide 9". |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
-You can also edit `index.html` or `theme.css` in any editor; the slide reloads, and Claude is told
+You can also edit `index.html` or `theme.css` in any editor; the slide reloads, and the assistant is told
 the files changed. CSS changes are swapped in without a reload.
 
 ## PowerPoint import
@@ -267,10 +366,10 @@ The import keeps what can be carried over exactly and makes pictures of the rest
   accents, braces, matrices and the bold, italic and double-struck math letters are converted.
 * **Hidden slides** stay hidden (`data-visibility="hidden"`).
 
-**Hand-off to Claude.** Slides the import can only approximate are tagged *complex* in the dialog:
+**Hand-off to the assistant.** Slides the import can only approximate are tagged *complex* in the dialog:
 diagrams of many shapes or tables with shapes over them that became pictures, pictures placed inside
 text (often equations as images), build steps on parts of a diagram, slides without a title, and
-text that had to shrink to fit. With **Then ask Claude to improve the complex slides** ticked, Claude
+text that had to shrink to fit. With **Then ask the assistant to improve the complex slides** ticked, the assistant
 gets these slides right after the import, each with a picture of the original slide and the texts of
 its diagrams, and rebuilds diagrams as SVG, equations as TeX and tables as HTML in the deck's style.
 The request shows in the chat like your own messages, and its changes can be undone as usual.
@@ -282,12 +381,12 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **Element ids.** On start, the server gives every slide and every visible element a readable
   `data-eid` attribute (`summary`, `summary/callout`, `summary/li-2`). Only the attribute is
   inserted; the rest of the file stays as it was. A backup of the file before the first change is
-  kept in `~/.pindeck/decks/<deck>/backups/`. Ids survive edits, so pins, layout reports and Claude all name
+  kept in `~/.pindeck-v3/decks/<deck>/backups/`. Ids survive edits, so pins, layout reports and the assistant all name
   the same element.
 * **Hand edits.** A move is stored as the CSS `translate` property and a resize as `width`/`height`,
   inline on the element in `index.html`. `translate` moves an element without changing the layout
   around it, for elements in the flow and absolutely positioned ones alike. Only that one style
-  attribute is rewritten; the rest of the file stays as it was. Claude gets a note about each hand
+  attribute is rewritten; the rest of the file stays as it was. The assistant gets a note about each hand
   edit. Brand-locked elements (footer, logos) cannot be selected.
 * **Text edits.** While you type, the element holds its source HTML from `index.html`, not the
   rendered slide, so math stays TeX and nothing that KaTeX or the deck script generates ends up in
@@ -299,24 +398,28 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
   locked.
 * **Layout instead of screenshots.** With each message the editor measures the current slide and
   every pinned slide in your browser: position and size of every element, font sizes, and issues
-  (content below the footer rule, outside the slide, overlaps, clipped text). Claude gets this as
+  (content below the footer rule, outside the slide, overlaps, clipped text). The assistant gets this as
   text. To check its own work it runs the PinDeck CLI's `layout <slide>...` (`--issues` for the
   issues only). Screenshots are
-  only taken when you tick the box or Claude needs a visual judgement.
-* **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
-  running, so there is no start-up delay per message. It runs in the deck folder under your Claude
-  login, with `--append-system-prompt` from `lib/system-prompt.md` and the deck's `CLAUDE.md`.
-* **Permissions.** Claude may read files, edit and create files in the deck folder, and run the editor's
-  CLI. Nothing else: no other commands, and no edits to `brand.css`, `vendor/`, `.git/` or, for a named
-  deck file, the other decks in its folder. Claude Code loads no settings files
-  and no MCP servers, so no allow rule in your own, the deck's or a parent folder's settings widens this. If `brand.css` changes during a
-  turn anyway, the server restores it and says so in the chat.
-* **Undo.** The server keeps a copy of every file a change touched, from before and after it (a Claude
+  only taken when you tick the box or the assistant needs a visual judgement.
+* **One selected backend.** Claude runs as a long-lived `claude -p` stream-json process; Codex runs as a
+  local app-server over stdio. Both run in the deck folder under your own login, with the instructions
+  from `lib/system-prompt.md` and the deck's `CLAUDE.md` and `AGENTS.md`. Codex model and effort changes
+  reuse the active thread writer and apply to the next turn. Claude changes and provider switches prepare
+  a replacement process before retiring the old one. Events from replaced sessions are ignored.
+* **Permissions.** The assistant may read files, edit and create files in the deck folder, and run the
+  editor's CLI. Nothing else: no other commands, and no edits to `brand.css`, `vendor/`, `.git/` or, for a
+  named deck file, the other decks in its folder. Claude Code loads no settings files and no MCP servers,
+  so no allow rule in your own, the deck's or a parent folder's settings widens this. Codex has no shell
+  and no file access of its own: it reads and edits through PinDeck's own tools, which apply the same
+  rules and refuse symlinks out of the deck. If `brand.css` changes during a turn anyway, the server
+  restores it and says so in the chat.
+* **Undo.** The server keeps a copy of every file a change touched, from before and after it (an AI
   turn, which may change, create or delete several files of the deck, or a hand edit). Files over 2 MB
   are not copied: the chat says when a turn changed one, and Undo leaves it as it is. Hidden files,
-  `vendor/` and `export/` are not part of undo. Undo and redo walk that history and tell Claude on the next message. They first check
-  that the files are still as that change left them; if something else changed them since, they do
-  nothing and say which file differs, rather than overwrite that work.
+  `vendor/` and `export/` are not part of undo. Undo and redo walk that history and tell the assistant on
+  the next message. They first check that the files are still as that change left them; if something
+  else changed them since, they do nothing and say which file differs, rather than overwrite that work.
 * **Saving.** Every file PinDeck writes into the deck is written to a temporary file next to it and then
   renamed into place, so other programs never see half a file. Each change from the editor carries the
   revision of the files it was made on; if the files have changed since, the change is refused, the
@@ -326,8 +429,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 | File | Purpose |
 |---|---|
-| `server.mjs` | Local server (127.0.0.1 only, random token per run, one-time login links): UI, deck files, events, Claude session, undo, CLI endpoints, `login`. |
-| `cli.mjs` | `layout`, `shot`, `slides`, `pdf handout` / `pdf presentation` and `pdf-figure` commands for Claude (and for you), and `git-setup`. |
+| `server.mjs` | Local server (127.0.0.1 only, random token per run, one-time login links): UI, deck files, events, backend session, undo, CLI endpoints, `login`. |
+| `cli.mjs` | `layout`, `shot`, `slides`, `pdf handout` / `pdf presentation` and `pdf-figure` commands for the backends (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
 | `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
 | `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, tables, build steps, audio, layout, HTML in the deck's style. |
@@ -336,10 +439,11 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 | `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide and PDF pictures: PowerPoint or Keynote (macOS) or LibreOffice (Linux) saves a PDF; macOS PDFKit or Poppler renders pages and regions of it. |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
-| `lib/claude.mjs` | The long-running Claude Code process. |
-| `lib/capabilities.mjs` | What this server can do on this system (macOS, Linux), for the editor, the API, the CLI and Claude. |
+| `lib/claude.mjs`, `lib/codex.mjs`, `lib/agent-process.mjs` | Backend adapters and JSON-line transport. |
+| `lib/models.mjs`, `lib/agent-tools.mjs` | Model/settings normalization, handover, and restricted Codex tools. |
+| `lib/capabilities.mjs` | What this server can do on this system (macOS, Linux), for the editor, the API, the CLI and the assistant. |
 | `lib/deck-files.mjs` | Atomic writes and the revision of the deck's files. |
-| `lib/system-prompt.md` | What Claude is told about the editor. |
+| `lib/system-prompt.md` | What the assistant is told about the editor. |
 | `CONTRIBUTING.md` | How to report bugs and contribute. |
 | `docs/` | Images for this README. |
 | `LICENSE` | MIT. |
@@ -348,16 +452,20 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 * reveal.js decks only. A deck made with another framework (Marp, Slidev, impress.js, remark, Spectacle,
   Shower, deck.js, bespoke.js) is recognised and refused with its name before PinDeck changes anything.
-* Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
+* Text inside inline SVG diagrams cannot be edited in place; pin it and ask the assistant.
 * Parts of an inline SVG move with the whole SVG; inline text (bold, spans) moves with its block.
-* No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does not merge it with the one above; ask Claude for those.
-* Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to turn hand edits into proper CSS when a layout should really change.
+* No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does not merge it with the one above; ask the assistant for those.
+* Moves are offsets (`translate`), so the space an element came from stays reserved. Ask the assistant to turn hand edits into proper CSS when a layout should really change.
 * The undo history lives on the server and starts fresh when PinDeck restarts.
 * One writer at a time: PinDeck is not made for editing the same deck from two editors or tools at once.
 * Linux (beta): pictures of PDF pages and PowerPoint slides, and waveforms of non-WAV audio, need
   Poppler, LibreOffice and ffmpeg on the server (see [Running on a Linux server](#running-on-a-linux-server-beta)).
 
 ## Versions
+
+* **3.0.0-beta.1**: Claude and Codex adapters, discovered model/effort menu, explicit provider
+  switching with optional handover, curated model lists, a separate effort selector with per-model
+  preferences, restricted Codex tools, and separate v3 runtime state. Not published.
 
 * **2.10.0-beta.1** (2.10 beta): decks with their own file names and shared files, and Claude working
   on the whole deck.
@@ -453,7 +561,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **1.11.1**: the Hide and Show icons sit at the same height.
 * **1.11**: hide and show slides (eye in the slide list, toolbar button, `H`); hidden slides are skipped
   when presenting and in PDFs unless the export includes them.
-* **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in `~/.pindeck/config.json`.
+* **1.10**: model and effort without "Default" entries (default Sonnet, medium), set in `~/.pindeck-v3/config.json`.
 * **1.9**: `node cli.mjs git-setup` keeps PinDeck's ids out of git with a clean filter; id-only changes no longer show in `git status`.
 * **1.8**: ＋ New slide (content slide, section divider, duplicate); model (Opus, Sonnet) and effort menu in the chat header; a + menu in the chat for files and screenshots.
 * **1.7**: `Delete` removes the selected element after a confirmation, a picture with its caption, and optionally the files nothing else uses; undo restores elements and files. Claude reads attached images directly instead of trying to convert them; refused commands are explained in the chat.
@@ -470,7 +578,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 Bug reports, ideas, example decks and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
 explains how to report a bug, set up PinDeck for development, test a change by hand, and what a pull
 request should contain. In short: no npm dependencies, deck files are edited only where they must
-change, Claude's permissions stay narrow, and the README describes what users see.
+change, both backends’ permissions stay narrow, and the README describes what users see.
 
 ## License
 
