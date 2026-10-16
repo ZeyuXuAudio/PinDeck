@@ -41,6 +41,11 @@ const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 const opt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv.splice(i, 2)[1] : dflt; };
 const PORT = +opt("--port", process.env.PORT || 5180);
+if (process.platform !== "darwin") {
+  const { showPlatformNotice } = await import("./lib/platform-notice.mjs");
+  await showPlatformNotice(PORT);
+  process.exit(0);
+}
 const MODEL = opt("--model", process.env.CLAUDE_MODEL || "");
 const DECK_DIR = path.resolve(argv[0] || process.cwd());
 const DECK_FILE = "index.html";

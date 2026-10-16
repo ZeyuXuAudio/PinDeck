@@ -1,5 +1,7 @@
 # PinDeck
 
+> **macOS only.** Windows and Linux are not supported.
+
 **Pin it. Say it. Done.** PinDeck is a local editor for HTML slide decks (reveal.js): the slides on
 the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
 pin them, write what to change, and Claude edits the HTML and CSS. The slide updates in place.
@@ -25,6 +27,10 @@ checked the layout; the next request, still being typed, refers to the new pins 
 * **Local and small.** One Node process on 127.0.0.1, no npm dependencies, your normal Claude login.
 
 ## Quick start
+
+Requires macOS. The npm package declares `"os": ["darwin"]`, so normal npm installation
+rejects other operating systems. Overriding that check does not make those platforms supported. Running the server from a cloned
+repository on another OS shows a local support notice instead of opening the deck or starting Claude.
 
 ```bash
 npx pindeck path/to/deck        # from npm
@@ -248,6 +254,10 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * The undo history lives on the server and starts fresh when PinDeck restarts.
 
 ## Versions
+
+* **2.8.2**: declares macOS-only support in npm metadata and the README to prevent accidental
+  installation on unsupported operating systems. Source launches on other platforms show a support
+  notice without opening the deck.
 
 * **2.8.1**: fixes from a review. Speaker notes that fail to load leave the field empty and locked, instead
   of showing the previous slide's notes and saving your edits over them. A save that fails because the
