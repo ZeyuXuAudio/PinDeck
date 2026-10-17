@@ -465,7 +465,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 * **3.0.0-beta.1**: Claude and Codex adapters, discovered model/effort menu, explicit provider
   switching with optional handover, curated model lists, a separate effort selector with per-model
-  preferences, restricted Codex tools, and separate v3 runtime state. Not published.
+  preferences, restricted Codex tools, and separate v3 runtime state. On npm as `pindeck@beta`.
 
 * **2.10.0-beta.1** (2.10 beta): decks with their own file names and shared files, and Claude working
   on the whole deck.
