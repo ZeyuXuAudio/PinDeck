@@ -308,6 +308,12 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.9.0-beta.1** (2.9 beta): runs on Linux as a headless server, used from a Mac's browser through an
+  SSH tunnel, with Claude Code running on the server. Features a system cannot provide are switched off
+  with a reason in the editor. Saving is atomic; edits made on files that changed meanwhile are refused,
+  and Undo/Redo no longer overwrite changes made outside PinDeck. `git-setup` works for decks behind
+  symlinks or with spaces in their path.
+
 * **2.8.2**: declares macOS-only support in npm metadata and the README to prevent accidental
   installation on unsupported operating systems. Source launches on other platforms show a support
   notice without opening the deck.
