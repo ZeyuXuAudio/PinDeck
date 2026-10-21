@@ -1,7 +1,7 @@
 {
   "name": "pindeck",
   "version": "2.8.2",
-  "description": "PinDeck: a local macOS editor for HTML slide decks. Pin elements, describe the change, and Claude Code edits the slides.",
+  "description": "PinDeck: an editor for HTML slide decks on macOS, and on Linux (beta) through an SSH tunnel. Pin elements, describe the change, and Claude Code edits the slides.",
   "keywords": [
     "slides",
     "presentation",
@@ -35,7 +35,7 @@
     "start": "node server.mjs",
     "test": "node --test"
   },
-  "os": ["darwin"],
+  "os": ["darwin", "linux"],
   "engines": {
     "node": ">=20"
   }

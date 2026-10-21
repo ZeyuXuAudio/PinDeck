@@ -30,6 +30,8 @@ import { printLayout, printPdf, PDF_HEAD_TAG, PDF_PAGE_TAG } from "./lib/pdf.mjs
 import { readPptx } from "./lib/pptx.mjs";
 import { exportPdf as pptxToPdf, renderJobs, renderAvailable, pdfInfo } from "./lib/pptx-render.mjs";
 import { buildImport, planSlides } from "./lib/pptx-import.mjs";
+import { isSupportedPlatform, detectCapabilities, publicCapabilities, capabilityPrompt, parsePort, cliCommand, findExecutable } from "./lib/capabilities.mjs";
+import { writeAtomic, sameContent, revision } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
 const USAGE = `Usage: pindeck [deck-folder] [--port 5180] [--model <name>]
@@ -40,8 +42,10 @@ const EDITOR_DIR = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 const opt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv.splice(i, 2)[1] : dflt; };
-const PORT = +opt("--port", process.env.PORT || 5180);
-if (process.platform !== "darwin") {
+const portArg = opt("--port", process.env.PORT || 5180);
+let PORT = parsePort(portArg);   // the port actually bound once listening (--port 0 picks a free one)
+if (PORT === null) { console.error(`Invalid port "${portArg}": use a number from 1 to 65535.\n\n${USAGE}`); process.exit(2); }
+if (!isSupportedPlatform(process.platform)) {
   const { showPlatformNotice } = await import("./lib/platform-notice.mjs");
   await showPlatformNotice(PORT);
   process.exit(0);
@@ -58,18 +62,44 @@ const STATE_DIR = path.join(HOME_DIR, "decks", deckKey);
 const SHOT_DIR = path.join(STATE_DIR, "shots");
 const PDF_DIR = path.join(STATE_DIR, "attachments");   // attached PDFs: reading material, not part of the deck
 const TOKEN = crypto.randomBytes(16).toString("hex");
-const ORIGIN = `http://127.0.0.1:${PORT}`;
+let ORIGIN = `http://127.0.0.1:${PORT}`;   // set again from the bound port once listening
 const CLI_REL = path.relative(DECK_DIR, path.join(EDITOR_DIR, "cli.mjs")).split(path.sep).join("/");
-const CLI_CMD = /\s/.test(CLI_REL) ? `node "${CLI_REL}"` : `node ${CLI_REL}`;
+const CLI_CMD = cliCommand(CLI_REL);
+const CAPS = detectCapabilities();
 
-if (!fs.existsSync(path.join(DECK_DIR, DECK_FILE))) {
-  console.error(`No ${DECK_FILE} in ${DECK_DIR}\n\n${USAGE}`);
+/* Checks before anything is written: a deck that cannot be opened or saved is left exactly as it is. */
+function checkDeck() {
+  const file = path.join(DECK_DIR, DECK_FILE);
+  if (!fs.existsSync(file)) return `No ${DECK_FILE} in ${DECK_DIR}`;
+  try { fs.accessSync(file, fs.constants.R_OK | fs.constants.W_OK); }
+  catch { return `${file} cannot be read and written (check its permissions).`; }
+  // saving replaces the file through a temporary file next to it, so the folder must be writable too
+  try { fs.accessSync(DECK_DIR, fs.constants.W_OK); }
+  catch { return `${DECK_DIR} is not writable: PinDeck saves the deck through a temporary file in that folder.`; }
+  return null;
+}
+const deckProblem = checkDeck();
+if (deckProblem) {
+  console.error(`${deckProblem}\n\n${USAGE}`);
   process.exit(1);
 }
-fs.mkdirSync(SHOT_DIR, { recursive: true });
-const serverInfo = JSON.stringify({ url: ORIGIN, token: TOKEN, deckDir: DECK_DIR, pid: process.pid }, null, 2);
-fs.writeFileSync(path.join(STATE_DIR, "server.json"), serverInfo);
-fs.writeFileSync(path.join(HOME_DIR, "server.json"), serverInfo); // the CLI's fallback: most recent server
+/* Runtime files hold the token, the chat and attachments: private to the user. Written only after the
+   port is bound (see Start), so a failed start leaves no state behind. */
+const SERVER_FILES = [path.join(STATE_DIR, "server.json"), path.join(HOME_DIR, "server.json")];   // the second: the CLI's fallback
+function writeServerInfo() {
+  for (const d of [HOME_DIR, STATE_DIR, SHOT_DIR]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  const info = JSON.stringify({ url: ORIGIN, token: TOKEN, deckDir: DECK_DIR, pid: process.pid }, null, 2);
+  for (const f of SERVER_FILES) {
+    fs.writeFileSync(f, info, { mode: 0o600 });
+    fs.chmodSync(f, 0o600);
+  }
+}
+/* On exit: only our own server files, never those of a PinDeck started since for this or another deck. */
+function removeServerInfo() {
+  for (const f of SERVER_FILES) {
+    try { if (JSON.parse(fs.readFileSync(f, "utf8")).token === TOKEN) fs.rmSync(f, { force: true }); } catch {}
+  }
+}
 
 /* ---- Small helpers --------------------------------------------------------------- */
 const MIME = { html: "text/html; charset=utf-8", css: "text/css; charset=utf-8", js: "text/javascript; charset=utf-8",
@@ -82,10 +112,31 @@ const readDeck = (f) => { try { return fs.readFileSync(path.join(DECK_DIR, f), "
 const ourWrites = new Map(); // file -> { hash, manual } of what we wrote, to tell our writes from others
 function writeDeck(f, content, manual = false) {
   ourWrites.set(f, { hash: hash(content), manual });
-  fs.writeFileSync(path.join(DECK_DIR, f), content);
+  writeAtomic(path.join(DECK_DIR, f), content);
+}
+/* Other files PinDeck writes into the deck (uploads, imported pictures, undo/redo of deleted files) */
+function writeDeckFile(rel, data, manual = true) {
+  const abs = path.join(DECK_DIR, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  ourWrites.set(rel, { hash: hash(data.toString("utf8")), manual });   // manual: no slide reload for a new file
+  writeAtomic(abs, data);
 }
 const snapshot = (files) => Object.fromEntries(files.map((f) => [f, readDeck(f)]));
-const json = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+/* The revision of the editable files: sent with every API answer, checked on the editor's changes */
+const deckRev = () => revision(DECK_DIR, EDITABLE);
+const json = (res, code, obj) => {
+  res.writeHead(code, { "content-type": "application/json", "x-deck-rev": deckRev() });
+  res.end(JSON.stringify(obj));
+};
+/* A change from the editor made on files that have changed since it loaded them: refused (409), nothing
+   written. The editor keeps the user's text and reloads. Requests without a revision (older tabs, the
+   notes sent while the tab closes) are not checked. */
+function staleEdit(res, b) {
+  if (b.rev == null || b.rev === deckRev()) return false;
+  json(res, 409, { code: "stale", rev: deckRev(),
+    error: "The deck changed outside PinDeck since this slide was shown, so your change was not saved. The slide has been reloaded." });
+  return true;
+}
 const text = (res, code, s) => { res.writeHead(code, { "content-type": "text/plain; charset=utf-8" }); res.end(s); };
 async function body(req) {
   let s = "";
@@ -109,12 +160,13 @@ setInterval(() => { for (const res of clients) res.write(": ping\n\n"); }, 20000
 let backedUp = false;
 function runEidPass() {
   const html = readDeck(DECK_FILE);
+  if (html == null) return { changed: false, assigned: [] };   // being replaced by another program: next time
   const r = assignEids(html);
   if (r.changed) {
     if (!backedUp) {
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
-      fs.mkdirSync(path.join(STATE_DIR, "backups"), { recursive: true });
-      fs.writeFileSync(path.join(STATE_DIR, "backups", `index-${ts}.html`), html);
+      fs.mkdirSync(path.join(STATE_DIR, "backups"), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(STATE_DIR, "backups", `index-${ts}.html`), html, { mode: 0o600 });
       backedUp = true;
     }
     writeDeck(DECK_FILE, r.html);
@@ -131,11 +183,12 @@ function runEidPass() {
 let gitFilter = null;   // null: not checked yet
 const git = (args, cb) => execFile("git", ["-C", DECK_DIR, ...args], { encoding: "utf8" }, (err, out) => cb(err, (out || "").trim()));
 function refreshGit() {
-  const run = () => git(["hash-object", `--path=${DECK_FILE}`, DECK_FILE], (e1, cleaned) => {
+  // another git command (an IDE's `git status`) may hold the index lock: try again a few times, checking afresh
+  const run = (tries = 3) => git(["hash-object", `--path=${DECK_FILE}`, DECK_FILE], (e1, cleaned) => {
     if (e1 || !cleaned) return;
     git(["ls-files", "-s", "--", DECK_FILE], (e2, entry) => {
       const staged = entry.split(/\s+/)[1];
-      if (!e2 && staged === cleaned) git(["add", "--", DECK_FILE], () => {});
+      if (!e2 && staged === cleaned) git(["add", "--", DECK_FILE], (e3) => { if (e3 && tries > 1) setTimeout(() => run(tries - 1), 300); });
     });
   });
   if (gitFilter === null) {
@@ -157,17 +210,12 @@ function resolveSlide(spec) {
 }
 
 /* ---- Headless Chrome (screenshots, and layout when no editor tab is open) --------------- */
-const CHROME = [process.env.CHROME_BIN,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-  "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find((p) => p && fs.existsSync(p));
+const CHROME = CAPS.chromePath;   // null when Chrome features are unavailable (see lib/capabilities.mjs)
 /* Headless Chrome on macOS often lingers long after it has written its output, so we
    watch the output and stop Chrome as soon as `done(stdout, stderr)` says we have it. */
 let chromeSeq = 0;
 function chrome(args, done) {
-  if (!CHROME) return Promise.reject(new Error("No Chrome/Chromium found (set CHROME_BIN)."));
+  if (!CHROME) return Promise.reject(new Error(`Screenshots are not available: ${CAPS.screenshot.reason}.`));
   return new Promise((resolve, reject) => {
     // a profile per run: concurrent runs must not share one
     const profile = path.join(STATE_DIR, "chrome", `p${process.pid}-${++chromeSeq}`);
@@ -226,7 +274,11 @@ function measureInEditor(slide) {
     pending.set(id, { resolve, reject, t });
   });
 }
-const measure = (slide) => measureInEditor(slide).catch(() => measureHeadless(slide));
+const measure = (slide) => measureInEditor(slide).catch((e) => {
+  if (CAPS.headlessLayout.available) return measureHeadless(slide);
+  throw Object.assign(new Error(`Layout needs the editor open in a browser (${e.message}); ` +
+    `headless layout is not available: ${CAPS.headlessLayout.reason}.`), { status: 503 });
+});
 
 /* PDF export. handout: one page per slide, build steps in their final state.
    presentation: one page per build step (a slide with two clicks gives three pages).
@@ -234,7 +286,7 @@ const measure = (slide) => measureInEditor(slide).catch(() => measureHeadless(sl
 let exportQueue = Promise.resolve(), snapSeq = 0;
 const snapshots = new Map();   // id -> static print layout, served at /deck/__pindeck-print-<id>.html
 function exportPdf(kind, includeHidden = false) {
-  if (!CHROME) return Promise.reject(new Error("PDF export needs Chrome or Chromium (set CHROME_BIN)."));
+  if (!CAPS.pdfExport.available) return Promise.reject(Object.assign(new Error(`PDF export is not available: ${CAPS.pdfExport.reason}.`), { status: 501 }));
   const split = kind === "presentation";
   const name = `${path.basename(DECK_DIR)}-${split ? "presentation" : "handout"}.pdf`;
   const out = path.join(DECK_DIR, "export", name);
@@ -267,8 +319,15 @@ try {
   const saved = JSON.parse(fs.readFileSync(CHAT_FILE, "utf8"));
   Object.assign(state, { chat: saved.chat || [], seq: saved.seq || 0, sessionId: saved.sessionId || null });
 } catch {}
-const saveChat = () => fs.writeFile(CHAT_FILE,
-  JSON.stringify({ chat: state.chat.slice(-400), seq: state.seq, sessionId: state.sessionId }), () => {});
+/* Saved shortly after the last change, in one atomic write: overlapping writes could leave a broken file. */
+let chatTimer = null;
+function writeChat() {
+  clearTimeout(chatTimer);
+  chatTimer = null;
+  try { writeAtomic(CHAT_FILE, JSON.stringify({ chat: state.chat.slice(-400), seq: state.seq, sessionId: state.sessionId })); }
+  catch (e) { console.error(e.message); }
+}
+const saveChat = () => { chatTimer ??= setTimeout(writeChat, 100); };
 function addEntry(entry) {
   entry.id = ++state.seq;
   entry.time = Date.now();
@@ -295,16 +354,19 @@ else if (fileConfig.model !== undefined) console.warn(`config.json: unknown mode
 if (EFFORTS.includes(fileConfig.effort)) settings.effort = fileConfig.effort;
 else if (fileConfig.effort !== undefined) console.warn(`config.json: unknown effort "${fileConfig.effort}" (use ${EFFORTS.join(", ")}); using ${DEFAULTS.effort}.`);
 const saveSettings = () => fs.writeFile(CONFIG_FILE, JSON.stringify({ ...fileConfig, model: settings.model, effort: settings.effort }, null, 2) + "\n", () => {});
-if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort) saveSettings();   // create or complete the file
+const completeSettings = () => {   // create or complete the file (at start, once the port is bound)
+  if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort) saveSettings();
+};
 if (MODEL) settings.model = MODEL;   // --model on the command line: this run only, not saved
 
 const status = () => ({ busy: state.busy, model: state.model, sessionId: state.sessionId, settings: { ...settings },
-  running: session.running, deck: DECK_DIR, deckFile: DECK_FILE, chrome: !!CHROME,
+  running: session.running, deck: DECK_DIR, deckFile: DECK_FILE, chrome: CAPS.screenshot.available,
+  capabilities: publicCapabilities(CAPS), rev: deckRev(),
   undo: changeLabel(liveTurns().at(-1)), redo: changeLabel(state.redo.at(-1)) });
 const pushStatus = () => broadcast("status", status());
 
 const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md"), "utf8")
-  .replaceAll("{{CLI}}", CLI_CMD);
+  .replaceAll("{{CLI}}", CLI_CMD) + capabilityPrompt(CAPS, CLI_CMD);
 /* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
    or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
    MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
@@ -316,7 +378,7 @@ function deckInstructions() {
 let stderrTail = "";
 const session = new ClaudeSession({
   cwd: DECK_DIR,
-  env: { DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN },
+  env: () => ({ DECK_EDITOR_URL: ORIGIN, DECK_EDITOR_TOKEN: TOKEN }),
   args: () => [
     "--append-system-prompt", systemPrompt + deckInstructions(),
     "--setting-sources", "", "--strict-mcp-config",   // no settings files, no MCP servers or connectors
@@ -338,7 +400,10 @@ const session = new ClaudeSession({
   },
 });
 function ensureSession() {
-  if (!session.running) { stderrTail = ""; session.start(state.sessionId); pushStatus(); }
+  if (session.running || quitting || !detectCapabilities().claude.available) return;
+  stderrTail = "";
+  session.start(state.sessionId);
+  pushStatus();
 }
 
 function toolSummary(name, input = {}) {
@@ -398,6 +463,7 @@ function startTurn(promptText, userEntry) {
   state.busy = true;
   pushStatus();
   ensureSession();
+  if (!session.running) return finishTurn({ error: detectCapabilities().claude.reason || "Claude Code could not be started." });
   session.send([{ type: "text", text: promptText }]);
 }
 
@@ -503,7 +569,7 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
    screenshots folder, for Claude to look at before choosing; with one, into the deck. */
 async function pdfFigure({ file = "", page = "1", box = "", out = "", width = "" }) {
   const bad = (t, status = 400) => ({ status, text: t });
-  if (process.platform !== "darwin") return bad("Rendering PDF pages needs macOS (PDFKit).", 501);
+  if (!CAPS.pdfPages.available) return bad(CAPS.pdfPages.reason, 501);
   const abs = [path.isAbsolute(file) ? file : path.join(DECK_DIR, file), path.join(PDF_DIR, path.basename(file))]
     .map((f) => path.resolve(f)).find((f) => /\.pdf$/i.test(f) && fs.existsSync(f) &&
       [DECK_DIR, PDF_DIR].some((d) => f.startsWith(d + path.sep)));
@@ -526,18 +592,25 @@ async function pdfFigure({ file = "", page = "1", box = "", out = "", width = ""
   if (!out) return { text: `${tmp} (${size}). Read it; add a figures/ name to save it into the deck.` };
   const buf = fs.readFileSync(tmp);
   fs.rmSync(tmp, { force: true });
-  fs.mkdirSync(path.join(DECK_DIR, "figures"), { recursive: true });
-  ourWrites.set(out, { hash: hash(buf.toString("utf8")), manual: true });   // no slide reload for a new file
-  fs.writeFileSync(path.join(DECK_DIR, out), buf);
+  writeDeckFile(out, buf);
   state.pdfFigures.add(out);
   return { text: `${out} (${size})` };
 }
 
-/* ---- File watching -------------------------------------------------------------------------- */
-let changed = new Set(), flush = null, eidTimer = null;
-fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
-  if (!file || /(^|\/)\.|\.bak$|~$|^export[\/]/.test(file)) return;
-  changed.add(file.split(path.sep).join("/"));
+/* ---- File watching --------------------------------------------------------------------------
+   Changes are collected for 120 ms and sent to the editor with the deck's revision, so a tab that missed
+   events (reconnect) can still tell that it shows an old state. Dot files (PinDeck's temporary files,
+   editors' swap files), backups and export/ are ignored. If the watcher fails (folder replaced, too many
+   files), it is started again and the editor told to reload everything. */
+let changed = new Set(), flush = null, eidTimer = null, watcher = null;
+function onFileEvent(_ev, file) {
+  if (!file) { changed.add(DECK_FILE); return scheduleFlush(); }   // some systems omit the name: assume the deck
+  file = String(file).split(path.sep).join("/");
+  if (/(^|\/)\.|\.bak$|~$|^export\//.test(file)) return;
+  changed.add(file);
+  scheduleFlush();
+}
+function scheduleFlush() {
   clearTimeout(flush);
   flush = setTimeout(() => {
     const files = [...changed];
@@ -553,14 +626,33 @@ fs.watch(DECK_DIR, { recursive: true }, (_ev, file) => {
     if (external) {
       state.notes = [...new Set([...state.notes,
         "The deck files changed outside this chat since your last turn (edited by hand or by another tool). Re-read before editing."])];
-      // new elements from a hand edit get ids once the file is quiet
+      // new elements from a hand edit get ids once the file is quiet: unchanged for 800 ms and present
       clearTimeout(eidTimer);
-      eidTimer = setTimeout(() => { if (!state.busy) runEidPass(); }, 800);
+      const seen = hash(readDeck(DECK_FILE) ?? "");
+      const pass = () => {
+        if (state.busy) return;
+        const now = readDeck(DECK_FILE);
+        if (now == null || hash(now) !== seen) return;   // still being written; its own event comes
+        runEidPass();
+      };
+      eidTimer = setTimeout(pass, 800);
     }
     // manual: only drag/resize writes, which the browser already shows; no reload of the visible slide
-    broadcast("files", { files, manual });
+    broadcast("files", { files, manual, rev: deckRev() });
   }, 120);
-});
+}
+function startWatcher() {
+  watcher = fs.watch(DECK_DIR, { recursive: true }, onFileEvent);
+  watcher.on("error", (e) => {
+    console.error(`Watching ${DECK_DIR} failed (${e.message}); starting again.`);
+    try { watcher.close(); } catch {}
+    setTimeout(() => {
+      if (quitting) return;
+      try { startWatcher(); } catch (e2) { console.error(`Cannot watch ${DECK_DIR}: ${e2.message}`); }
+      broadcast("files", { files: [...EDITABLE], manual: false, rev: deckRev(), resync: true });
+    }, 1000);
+  });
+}
 
 /* ---- Hand edits ----------------------------------------------------------------------------------------- */
 function recordHandEdit(before, html, label, note, { manual = true, deletedFiles = [], addedFiles = [], chat = true } = {}) {
@@ -597,21 +689,46 @@ function deletePlan(eid) {
   return { ...target, html: rest, files };
 }
 
-/* ---- Undo (Claude's turns and hand edits share one history) ---------------------------------------- */
+/* ---- Undo (Claude's turns and hand edits share one history) ----------------------------------------
+   Undo puts back the files as they were before a change, Redo as they were after it. Both first check that
+   every file they touch is exactly as that change left it (or, for Redo, as the undo left it): the editable
+   files, and the pictures or audio files they would delete or bring back. Anything else means the files
+   were changed since, by hand or by another program, and going back would silently throw that work away.
+   Then nothing is written and the answer is 409 with the files that differ. */
+function undoConflicts(t, direction) {
+  const expect = direction === "undo" ? t.after : t.before;
+  const files = EDITABLE.filter((f) => (readDeck(f) ?? null) !== (expect[f] ?? null));
+  // undo brings deleted files back (their place must be free, or hold the same bytes) and removes added
+  // ones (which must be unchanged); redo the other way round
+  const comeBack = direction === "undo" ? t.deletedFiles || [] : t.addedFiles || [];
+  const go = direction === "undo" ? t.addedFiles || [] : t.deletedFiles || [];
+  for (const { rel, data } of comeBack) {
+    const abs = path.join(DECK_DIR, rel);
+    if (fs.existsSync(abs) && !sameContent(abs, data)) files.push(rel);
+  }
+  for (const { rel, data } of go) {
+    const abs = path.join(DECK_DIR, rel);
+    if (fs.existsSync(abs) && !sameContent(abs, data)) files.push(rel);
+  }
+  return files;
+}
+function conflict(res, direction, files) {
+  json(res, 409, { code: "diverged", files,
+    error: `${files.join(", ")} changed since then (edited outside PinDeck?), so ${direction === "undo" ? "Undo" : "Redo"} was not done: ` +
+      `it would overwrite those changes. Reload to see the files as they are.` });
+}
 function undo(res) {
   if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
   const t = liveTurns().at(-1);
   if (!t) return json(res, 409, { error: "Nothing to undo." });
-  const edited = EDITABLE.some((f) => readDeck(f) !== t.after[f]);
+  const diverged = undoConflicts(t, "undo");
+  if (diverged.length) return conflict(res, "undo", diverged);
   for (const f of EDITABLE) {
     if (readDeck(f) === t.before[f]) continue;
     if (t.before[f] != null) writeDeck(f, t.before[f]);
     else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // the change created the file
   }
-  for (const { rel, data } of t.deletedFiles || []) {   // files deleted with an element come back too
-    fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
-    fs.writeFileSync(path.join(DECK_DIR, rel), data);
-  }
+  for (const { rel, data } of t.deletedFiles || []) writeDeckFile(rel, data, false);   // files deleted with an element come back too
   for (const { rel } of t.addedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });   // imported figures go
   t.undone = true;
   state.redo.push(t);
@@ -619,7 +736,6 @@ function undo(res) {
     ? `The user undid their hand edit (${t.label}); ${DECK_FILE} is back to the state before it.`
     : `The user undid your change from turn ${t.id}; ${t.files.map((f) => f.file).join(" and ")} are back to the state before it. Re-read before editing.`);
   broadcast("undone", { turnId: t.id, undone: true });
-  if (edited) addEntry({ kind: "notice", text: "Undone. Edits made after that change were reverted too." });
   pushStatus();
   return json(res, 200, {});
 }
@@ -631,7 +747,6 @@ function undo(res) {
 const IMPORT_DIR = path.join(STATE_DIR, "imports");
 const IMPORT_MAX = 500 * 1024 * 1024;
 let lastImport = null;   // { id, name, dir, model, render: Promise<pdf path | null>, renderError }
-fs.rmSync(IMPORT_DIR, { recursive: true, force: true });
 
 function startImport(name, buf) {
   const model = readPptx(buf);   // first: a file that cannot be read leaves the previous import as it was
@@ -678,12 +793,7 @@ async function applyImport(imp, numbers, afterEid, refine = false) {
   const ls = html0.lastIndexOf("\n", after.start - 1) + 1;
   const indent = /^\s*$/.test(html0.slice(ls, after.start)) ? html0.slice(ls, after.start) : "";
   const html = assignEids(html0.slice(0, end) + r.fragments.map((f) => `\n\n${indent}` + f).join("") + html0.slice(end)).html;
-  for (const f of r.files) {
-    const abs = path.join(DECK_DIR, f.rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    ourWrites.set(f.rel, { hash: hash(f.data.toString("utf8")), manual: true });   // no reload for each new file
-    fs.writeFileSync(abs, f.data);
-  }
+  for (const f of r.files) writeDeckFile(f.rel, f.data);   // manual: no reload for each new file
   const all = findSlides(parse(html));
   const first = afterIdx + 1, last = afterIdx + r.fragments.length;
   const eids = all.slice(first, last + 1).map((s) => s.attrs["data-eid"]?.value);
@@ -741,7 +851,7 @@ async function refineImport(imp, pdf, plans, eids, first) {
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
-const HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+let HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);   // set again from the bound port
 
 function serveFile(res, file, transform) {
   fs.readFile(file, (err, data) => {
@@ -752,7 +862,9 @@ function serveFile(res, file, transform) {
   });
 }
 
+let ready = false;
 const server = http.createServer(async (req, res) => {
+  if (!ready) return text(res, 503, "PinDeck is starting. Reload in a moment.");
   // only pages opened as 127.0.0.1 or localhost: another site's name pointed at 127.0.0.1 (DNS rebinding)
   // must not read the editor page, its token or the deck
   if (!HOSTS.has(String(req.headers.host || "").toLowerCase())) return text(res, 403, "Bad host");
@@ -796,13 +908,14 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/api/events") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-      res.write(`event: hello\ndata: ${JSON.stringify({ chat: state.chat, status: status(),
+      res.write(`event: hello\ndata: ${JSON.stringify({ chat: state.chat, status: status(), rev: deckRev(),
         turns: state.turns.map((t) => ({ id: t.id, undone: t.undone })) })}\n\n`);
       clients.add(res);
       req.on("close", () => clients.delete(res));
       return;
     }
     if (p === "/api/ping") return json(res, 200, { ok: true });
+    if (p === "/api/status") return json(res, 200, status());
     if (p === "/api/current" && req.method === "POST") { state.current = await body(req); return json(res, 200, {}); }
     if (p === "/api/pins" && req.method === "POST") { state.pins = (await body(req)).pins || []; return json(res, 200, {}); }
     if (p === "/api/measure-result" && req.method === "POST") {
@@ -814,6 +927,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/api/message" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is still working." });
+      // checked again here: the claude command may have been installed (or removed) since the start
+      const claude = detectCapabilities().claude;
+      if (!claude.available) return json(res, 503, { code: "claude-unavailable", error: claude.reason });
       const b = await body(req);
       if (typeof b.text !== "string" || !b.text.trim()) return json(res, 400, { error: "Empty message." });
       // what the prompt reads from pins and the selection must be there
@@ -853,18 +969,16 @@ const server = http.createServer(async (req, res) => {
       const buf = Buffer.concat(chunks);
       if (kind === "pdf") {
         if (buf.subarray(0, 5).toString() !== "%PDF-") return json(res, 415, { error: `${original} is not a PDF.` });
-        fs.mkdirSync(PDF_DIR, { recursive: true });
+        fs.mkdirSync(PDF_DIR, { recursive: true, mode: 0o700 });
         const abs = attachPath(original, PDF_DIR);
-        fs.writeFileSync(abs, buf);
+        fs.writeFileSync(abs, buf, { mode: 0o600 });
         state.uploads.add(abs);
         let info = null;
-        if (process.platform === "darwin") { try { info = await pdfInfo(abs, STATE_DIR); } catch {} }
+        if (CAPS.pdfPages.available) { try { info = await pdfInfo(abs, STATE_DIR); } catch {} }
         return json(res, 200, { path: abs, kind, bytes: buf.length, pages: info?.pages, pageSize: info?.sizes[0] });
       }
       const rel = attachPath(original);
-      fs.mkdirSync(path.join(DECK_DIR, "figures"), { recursive: true });
-      ourWrites.set(rel, { hash: hash(buf.toString("utf8")), manual: true });   // no slide reload for a new file
-      fs.writeFileSync(path.join(DECK_DIR, rel), buf);
+      writeDeckFile(rel, buf);
       state.uploads.add(rel);
       return json(res, 200, { path: rel, kind, bytes: buf.length, url: `/deck/${rel}` });
     }
@@ -886,7 +1000,7 @@ const server = http.createServer(async (req, res) => {
       Object.assign(settings, { model, effort });
       saveSettings();
       // restart the session with the new flags; --resume keeps the conversation
-      if (session.running) { session.stop(); setTimeout(ensureSession, 300); }
+      if (session.running) session.stop().then(() => { if (!quitting) ensureSession(); });
       addEntry({ kind: "notice", text: `Model: ${model[0].toUpperCase() + model.slice(1)}, effort: ${effort}. The conversation continues.` });
       pushStatus();
       return json(res, 200, { settings });
@@ -894,6 +1008,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/slide-hidden" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const slides = findSlides(parse(before[DECK_FILE]));
       const index = slides.findIndex((s) => s.attrs["data-eid"]?.value === b.eid);
@@ -909,6 +1024,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/move-slide" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const r = moveSlide(before[DECK_FILE], b.eid, b.before ?? null);
       if (r.error) return json(res, 409, { error: r.error });
@@ -921,6 +1037,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/add-slide" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       if (!["content", "section", "duplicate"].includes(b.kind)) return json(res, 400, { error: "Unknown slide kind." });
       const before = snapshot(EDITABLE);
       const r = insertSlide(before[DECK_FILE], b.kind, b.after);
@@ -935,6 +1052,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { turnId, index: r.index, eid });
     }
     if (p === "/api/import" && req.method === "POST") {
+      if (!CAPS.pptxImport.available) return json(res, 501, { code: "unavailable", error: CAPS.pptxImport.reason });
       const name = path.basename(decodeURIComponent(String(req.headers["x-filename"] || "slides.pptx")));
       if (!/\.pptx$/i.test(name)) return json(res, 415, { error: "Choose a PowerPoint file (.pptx). Save older .ppt files as .pptx first." });
       const chunks = [];
@@ -960,6 +1078,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/import-apply" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const imp = lastImport;
       if (!imp || imp.id !== b.id) return json(res, 410, { error: "This import has expired. Choose the file again." });
       const numbers = (b.slides || []).filter((n) => imp.model.slides.some((s) => s.n === n));
@@ -1002,18 +1121,16 @@ const server = http.createServer(async (req, res) => {
       if (state.busy) return json(res, 409, { error: "Wait until Claude has finished." });
       const t = state.redo.at(-1);
       if (!t) return json(res, 409, { error: "Nothing to redo." });
-      if (EDITABLE.some((f) => (readDeck(f) ?? null) !== (t.before[f] ?? null))) {
-        state.redo = [];
-        pushStatus();
-        return json(res, 409, { error: "The files changed since the undo, so it cannot be redone." });
-      }
+      const diverged = undoConflicts(t, "redo");
+      if (diverged.length) return conflict(res, "redo", diverged);
       state.redo.pop();
-      for (const f of EDITABLE) if (t.after[f] != null) writeDeck(f, t.after[f]);
-      for (const { rel } of t.deletedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });
-      for (const { rel, data } of t.addedFiles || []) {
-        fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
-        fs.writeFileSync(path.join(DECK_DIR, rel), data);
+      for (const f of EDITABLE) {
+        if (readDeck(f) === t.after[f]) continue;
+        if (t.after[f] != null) writeDeck(f, t.after[f]);
+        else fs.rmSync(path.join(DECK_DIR, f), { force: true });
       }
+      for (const { rel } of t.deletedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });
+      for (const { rel, data } of t.addedFiles || []) writeDeckFile(rel, data, false);
       t.undone = false;
       state.notes.push(t.kind === "manual" ? `The user redid their hand edit: ${t.label}.`
         : `The user redid your change from turn ${t.id} after undoing it.`);
@@ -1031,6 +1148,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/delete" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const plan = deletePlan(b.eid);
       if (!plan) return json(res, 404, { error: "Element not found in the file." });
       const before = snapshot(EDITABLE);
@@ -1050,6 +1168,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/edit" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const r = setStyles(before[DECK_FILE], b.ops || []);
       if (r.missing.length) return json(res, 404, { error: `No element ${r.missing.join(", ")} in ${DECK_FILE}.` });
@@ -1071,6 +1190,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/notes" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const r = setNotes(before[DECK_FILE], b.eid, b.text, !!b.html);
       if (!r) return json(res, 404, { error: "Slide not found in the file." });
@@ -1085,6 +1205,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/text" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const r = setInner(before[DECK_FILE], b.eid, b.path || [], String(b.html ?? ""));
       if (!r) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
@@ -1100,6 +1221,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/split" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const r1 = setInner(before[DECK_FILE], b.eid, [], String(b.html ?? ""));
       if (!r1) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
@@ -1112,6 +1234,7 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/remove" && req.method === "POST") {
       if (state.busy) return json(res, 409, { error: "Claude is working. Wait until it has finished." });
       const b = await body(req);
+      if (staleEdit(res, b)) return;
       const before = snapshot(EDITABLE);
       const html = removeElement(before[DECK_FILE], b.eid);
       if (html == null) return json(res, 404, { error: `No element ${b.eid} in ${DECK_FILE}.` });
@@ -1123,13 +1246,14 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/export" && req.method === "POST") {
       const b = await body(req);
       try { return json(res, 200, await exportPdf(b.kind, b.includeHidden)); }
-      catch (e) { return json(res, 500, { error: String(e.message || e) }); }
+      catch (e) { return json(res, e.status || 500, { error: String(e.message || e) }); }
     }
 
     // CLI endpoints (used by Claude Code via cli.mjs)
     if (p === "/api/pdf") {
       const kind = url.searchParams.get("slide") || url.searchParams.get("kind") || "handout";
       if (!["handout", "presentation"].includes(kind)) return text(res, 400, 'Use "handout" or "presentation".');
+      if (!CAPS.pdfExport.available) return text(res, 501, `PDF export is not available: ${CAPS.pdfExport.reason}.`);
       const r = await exportPdf(kind, url.searchParams.get("all") === "1");
       return text(res, 200, r.path);
     }
@@ -1145,8 +1269,12 @@ const server = http.createServer(async (req, res) => {
       if (!slide) return text(res, 404, `No slide "${url.searchParams.get("slide")}". Use \`${CLI_CMD} slides\`.`);
       if (!slide.eid) runEidPass();
       const s2 = slide.eid ? slide : resolveSlide(String(slide.index + 1));
-      if (p === "/api/shot") return text(res, 200, await takeShot(s2));
-      return text(res, 200, formatLayout(await measure(s2)));
+      if (p === "/api/shot") {
+        if (!CAPS.screenshot.available) return text(res, 501, `Screenshots are not available: ${CAPS.screenshot.reason}.`);
+        return text(res, 200, await takeShot(s2));
+      }
+      try { return text(res, 200, formatLayout(await measure(s2))); }
+      catch (e) { if (e.status) return text(res, e.status, e.message); throw e; }
     }
     return text(res, 404, "Not found");
   } catch (e) {
@@ -1157,15 +1285,56 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-/* ---- Start ------------------------------------------------------------------------------------- */
-const first = runEidPass();
-if (first.changed) console.log(`Added ${first.assigned.length} element ids to ${DECK_FILE} (backup in ${path.join(STATE_DIR, "backups")}).`);
+/* ---- Start ----------------------------------------------------------------------------------------
+   The port is bound first. Only then does PinDeck write anything: its state folder and server files, and
+   the element ids in the deck. A port in use or another failure to listen leaves deck and state untouched. */
+let quitting = false;
+server.on("error", (e) => {
+  if (ready) return console.error(e);
+  console.error(e.code === "EADDRINUSE"
+    ? `Port ${PORT} is in use (another PinDeck, or an SSH tunnel?). Choose another with --port, the same on both ends of a tunnel.`
+    : `Cannot listen on 127.0.0.1:${PORT}: ${e.message}`);
+  process.exit(1);
+});
 server.listen(PORT, "127.0.0.1", () => {
+  PORT = server.address().port;
+  ORIGIN = `http://127.0.0.1:${PORT}`;
+  HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+  try {
+    writeServerInfo();
+    completeSettings();
+    fs.rmSync(IMPORT_DIR, { recursive: true, force: true });
+    const first = runEidPass();
+    if (first.changed) console.log(`Added ${first.assigned.length} element ids to ${DECK_FILE} (backup in ${path.join(STATE_DIR, "backups")}).`);
+    startWatcher();
+  } catch (e) {
+    console.error(`PinDeck could not open the deck: ${e.message}`);
+    removeServerInfo();
+    process.exit(1);
+  }
+  ready = true;
   console.log(`PinDeck: ${ORIGIN}/`);
   console.log(`Deck: ${DECK_DIR}`);
-  if (!CHROME) console.log("No Chrome found: screenshots are disabled (set CHROME_BIN).");
+  console.log(`Server: ${CAPS.label}`);
+  for (const [name, c] of Object.entries(publicCapabilities(CAPS)))
+    if (c && c.available === false) console.log(`  ${name}: off (${c.reason})`);
   ensureSession();
 });
-const quit = () => { session.stop(); setTimeout(() => process.exit(0), 300); };
+/* Ctrl+C or SIGTERM: stop taking requests, let Claude Code end (it gets end of input, then SIGTERM, then
+   SIGKILL), then exit. At most 6 s; a second Ctrl+C exits at once. A running turn is not resumed later. */
+async function quit() {
+  if (quitting) process.exit(1);
+  quitting = true;
+  try { watcher?.close(); } catch {}
+  clearTimeout(flush); clearTimeout(eidTimer);
+  for (const res of clients) res.end();
+  for (const w of pending.values()) { clearTimeout(w.t); w.reject(new Error("PinDeck is stopping")); }
+  server.close();
+  server.closeAllConnections?.();
+  removeServerInfo();
+  await Promise.race([session.stop(), new Promise((r) => setTimeout(r, 6000))]);
+  if (chatTimer) writeChat();
+  process.exit(0);
+}
 process.on("SIGINT", quit);
 process.on("SIGTERM", quit);

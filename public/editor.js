@@ -3,11 +3,21 @@
 const TOKEN = document.querySelector('meta[name="editor-token"]').content;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const api = (p, body) => fetch("/api/" + p, {
-  method: body === undefined ? "GET" : "POST",
-  headers: { "x-editor-token": TOKEN, "content-type": "application/json" },
-  body: body === undefined ? undefined : JSON.stringify(body),
-});
+/* Changes to the deck carry the revision of the files this tab shows (state.rev); the server refuses them
+   (409, code "stale") if the files have changed since. A change that went through gives the new revision. */
+const CHANGES = new Set(["edit", "text", "split", "remove", "notes", "slide-hidden", "move-slide", "add-slide",
+  "delete", "import-apply", "undo", "redo"]);
+const api = async (p, body) => {
+  const change = body !== undefined && CHANGES.has(p.split("?")[0]);
+  if (change && state.rev) body = { ...body, rev: state.rev };
+  const res = await fetch("/api/" + p, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "x-editor-token": TOKEN, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (change && res.ok && res.headers.get("x-deck-rev")) state.rev = res.headers.get("x-deck-rev");
+  return res;
+};
 
 const savedSlide = (() => { try { return +localStorage.getItem("editor.slide") || 0; } catch { return 0; } })();
 const state = {
@@ -102,7 +112,11 @@ window.__editorHost = {
   commitText(edit) {
     queueEdit(async () => {
       const res = await api("text", edit);
-      if (!res.ok) toast((await res.json().catch(() => ({}))).error || "Could not save the text.");
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        if (d.code === "stale") keepRejectedText(edit.text, d);
+        else toast(d.error || "Could not save the text.");
+      }
       loadMain();   // re-render: math, footer numbers, and the file as saved
     }, "Could not save the text.");
   },
@@ -171,6 +185,19 @@ async function undoRedo(which) {
   const res = await api(which, {});
   if (!res.ok) toast((await res.json().catch(() => ({}))).error || `Nothing to ${which}.`);
 }
+/* A text edit refused because the file changed meanwhile: the slide reloads with the file as it is now,
+   and the user's text stays available to copy and type in again. Nothing is merged automatically. */
+let rejectedText = "";
+function keepRejectedText(text, d) {
+  if (d.rev) state.rev = d.rev;
+  rejectedText = String(text ?? "");
+  toast(`${esc(d.error)}<a href="#" data-copy-rejected>Copy your text</a>`, { html: true, ms: 20000 });
+}
+document.addEventListener("click", (e) => {
+  if (!e.target.closest?.("[data-copy-rejected]")) return;
+  e.preventDefault();
+  navigator.clipboard?.writeText(rejectedText).then(() => toast("Your text is on the clipboard."), () => toast(rejectedText, { ms: 20000 }));
+});
 let toastTimer = null;
 function toast(msg, { html = false, ms = 3200 } = {}) {
   $("toast")[html ? "innerHTML" : "textContent"] = msg;
@@ -725,8 +752,27 @@ function applyStatus(s) {
   $("model-btn").disabled = !!s.busy;
   $("conn").classList.toggle("on", !!s.running);
   $("conn").title = s.running ? "Claude Code is running" : "Claude Code starts with the next message";
+  const caps = s.capabilities || {};
+  const why = (c) => (c && c.available === false ? c.reason : "");
   $("add-shot").disabled = !s.chrome;
-  $("add-shot").title = s.chrome ? "" : "Screenshots need Chrome or Chromium";
+  $("add-shot").title = s.chrome ? "" : why(caps.screenshot) || "Screenshots need Chrome or Chromium";
+  for (const item of $("export-menu").querySelectorAll("[data-export]")) {
+    item.disabled = !!why(caps.pdfExport);
+    item.title = why(caps.pdfExport);
+  }
+  const imp = $("add-slide-menu").querySelector('[data-slide="import"]');
+  imp.disabled = !!why(caps.pptxImport);
+  imp.title = why(caps.pptxImport);
+  if (why(caps.claude)) $("conn").title = caps.claude.reason;
+  // where the server runs, when it is not this Mac's usual setup: "Linux (beta)", with what is off
+  const names = { claude: "Claude", screenshot: "Screenshots", headlessLayout: "Layout without an open editor",
+    pdfExport: "PDF export", pdfPages: "Pictures of PDF pages", pptxImport: "PowerPoint import",
+    pptxPictures: "Pictures of PowerPoint slides", audioConvert: "Waveforms of non-WAV audio" };
+  const off = Object.entries(caps).filter(([, c]) => c && c.available === false).map(([k]) => "• " + (names[k] || k));
+  const reasons = [...new Set(Object.values(caps).filter((c) => c && c.available === false).map((c) => c.reason))];
+  $("server-note").hidden = !caps.platform || caps.platform === "darwin";
+  $("server-note").textContent = caps.label ? `Server: ${caps.label}` : "";
+  $("server-note").title = off.length ? `Not available on this server:\n${off.join("\n")}\n\nWhy:\n${reasons.join("\n")}` : "";
   $("add-slide-btn").disabled = !!s.busy;
   renderToolbar();
 }
@@ -734,6 +780,9 @@ function connect() {
   const es = new EventSource(`/api/events?t=${TOKEN}`);
   es.addEventListener("hello", (ev) => {
     const d = JSON.parse(ev.data);
+    // reconnected after missing file events (tunnel dropped, laptop asleep): show the files as they are now
+    if (state.rev && d.rev && d.rev !== state.rev && main) { loadMain(); loadMeasure(); }
+    if (d.rev) state.rev = d.rev;
     clearChat();
     state.turns = new Map(d.turns.map((t) => [t.id, t]));
     d.chat.forEach(renderEntry);
@@ -757,7 +806,8 @@ function connect() {
     rerenderTurns();
   });
   es.addEventListener("files", (ev) => {
-    const { files, manual } = JSON.parse(ev.data);
+    const { files, manual, rev } = JSON.parse(ev.data);
+    if (rev) state.rev = rev;
     const cssOnly = files.every((f) => f.endsWith(".css"));
     if (manual && main) {
       loadMeasure();   // the visible slide already shows the hand edit
