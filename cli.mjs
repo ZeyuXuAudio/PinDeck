@@ -31,14 +31,16 @@ const arg = rest[0];
    on where PinDeck is installed; git config is per clone, so run this once in each clone. */
 if (cmd === "git-setup") {
   const FILTER = `sed 's/ data-eid="[^"]*"//g'`;
-  const deck = path.resolve(arg || ".");
+  let deck = path.resolve(arg || ".");
+  try { deck = fs.realpathSync(deck); } catch {}   // git reports the real path; a symlinked path would not match
   const git = (...a) => execFileSync("git", ["-C", deck, ...a], { encoding: "utf8" }).trim();
   let root;
   try { root = git("rev-parse", "--show-toplevel"); }
   catch { console.error(`${deck} is not inside a git repository.`); process.exit(1); }
   git("config", "filter.pindeck-ids.clean", FILTER);
   const rel = path.relative(root, deck).split(path.sep).join("/");
-  const pattern = `${rel ? rel + "/" : ""}*.html`;
+  // .gitattributes patterns end at whitespace: spaces in folder names are written as [[:space:]]
+  const pattern = `${rel ? rel.replace(/\s/g, "[[:space:]]") + "/" : ""}*.html`;
   const attrFile = path.join(root, ".gitattributes");
   const attrs = fs.existsSync(attrFile) ? fs.readFileSync(attrFile, "utf8") : "";
   const line = `${pattern} filter=pindeck-ids`;
