@@ -131,8 +131,9 @@ and on your Mac, in another terminal (`myserver` is your usual SSH host):
 ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:5180:127.0.0.1:5180 myserver
 ```
 
-Open <http://127.0.0.1:5180/> on the Mac. Use the same port on both ends, since PinDeck checks it; if 5180 is taken,
-use for example 5181 on both. If the tunnel drops, a message you have already sent keeps running on the
+Open <http://127.0.0.1:5180/> on the Mac. The local port may differ from the server's: with
+`-L 127.0.0.1:8080:127.0.0.1:5180`, open <http://127.0.0.1:8080/>. PinDeck accepts any port, as long as the
+address is `127.0.0.1` or `localhost`. If the tunnel drops, a message you have already sent keeps running on the
 server. Restart the tunnel and the editor reconnects and shows the files as they are then; it never sends a
 message twice. If PinDeck restarts, the page reloads itself with the new token.
 

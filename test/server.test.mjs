@@ -378,6 +378,17 @@ test("Loopback only; bad host, token and origin are refused", async (t) => {
   assert.equal(await raw(s.port, { method: "POST", p: "/api/notes", headers: { host: `127.0.0.1:${s.port}`,
     "x-editor-token": s.token, origin: "http://evil.example", "content-type": "application/json" } }), 403);
   assert.equal(await raw(s.port, { p: "/api/status", headers: { host: `localhost:${s.port}`, "x-editor-token": s.token } }), 200);
+  // a tunnel on another local port: any port, but only the loopback names, and the Origin must match the Host
+  assert.equal(await raw(s.port, { p: "/", headers: { host: "localhost:8080" } }), 200);
+  assert.equal(await raw(s.port, { p: "/", headers: { host: "127.0.0.1" } }), 200);
+  for (const host of ["evil.example", "127.0.0.1.evil.example:8080", "localhost:8080@evil.example", "localhost:abc", "localhost.:8080"])
+    assert.equal(await raw(s.port, { p: "/", headers: { host } }), 403, host);
+  const post = (host, origin) => raw(s.port, { method: "POST", p: "/api/notes", headers: { host, origin,
+    "x-editor-token": s.token, "content-type": "application/json" } });
+  assert.notEqual(await post("localhost:8080", "http://localhost:8080"), 403);
+  assert.equal(await post("localhost:8080", `http://127.0.0.1:${s.port}`), 403);
+  assert.equal(await post("localhost:8080", "http://localhost:8081"), 403);
+  assert.equal(await post("localhost:8080", "https://localhost:8080"), 403);
   assert.notEqual(await raw(s.port, { p: "/deck/..%2f..%2fstate%2fserver.json", headers: { host: `127.0.0.1:${s.port}` } }), 200);
   // nothing listens on the other interfaces
   const lan = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === "IPv4" && !i.internal);

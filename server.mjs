@@ -852,7 +852,9 @@ async function refineImport(imp, pdf, plans, eids, first) {
 
 /* ---- HTTP ------------------------------------------------------------------------------------- */
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
-let HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);   // set again from the bound port
+/* Pages opened as 127.0.0.1 or localhost only, on any port: an SSH tunnel may use another local port.
+   Another site's name pointed at 127.0.0.1 (DNS rebinding) must not read the editor page, its token or the deck. */
+const goodHost = (h) => /^(127\.0\.0\.1|localhost)(:\d{1,5})?$/.test(h);
 
 /* Files with a length and byte ranges: Safari plays audio and video only from servers that answer a
    Range request with 206, and seeking needs it everywhere. Transformed (HTML) files are sent whole. */
@@ -892,9 +894,8 @@ function serveFile(res, file, transform, req) {
 let ready = false;
 const server = http.createServer(async (req, res) => {
   if (!ready) return text(res, 503, "PinDeck is starting. Reload in a moment.");
-  // only pages opened as 127.0.0.1 or localhost: another site's name pointed at 127.0.0.1 (DNS rebinding)
-  // must not read the editor page, its token or the deck
-  if (!HOSTS.has(String(req.headers.host || "").toLowerCase())) return text(res, 403, "Bad host");
+  const host = String(req.headers.host || "").toLowerCase();
+  if (!goodHost(host)) return text(res, 403, "Bad host");
   const url = new URL(req.url, ORIGIN);
   const p = url.pathname;
   try {
@@ -930,7 +931,7 @@ const server = http.createServer(async (req, res) => {
     const tok = req.headers["x-editor-token"] || url.searchParams.get("t");
     if (tok !== TOKEN) return text(res, 403, "Bad token");
     const origin = req.headers.origin;
-    if (req.method === "POST" && origin && origin !== ORIGIN && origin !== `http://localhost:${PORT}`)
+    if (req.method === "POST" && origin && origin.toLowerCase() !== `http://${host}`)
       return text(res, 403, "Bad origin");
 
     if (p === "/api/events") {
@@ -1326,7 +1327,6 @@ server.on("error", (e) => {
 server.listen(PORT, "127.0.0.1", () => {
   PORT = server.address().port;
   ORIGIN = `http://127.0.0.1:${PORT}`;
-  HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
   try {
     writeServerInfo();
     completeSettings();
