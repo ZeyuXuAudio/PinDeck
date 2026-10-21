@@ -371,10 +371,12 @@ const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md
 /* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
    or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
    MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
-   the system prompt instead, read afresh at each session start. */
+   the system prompt instead, read afresh at each session start. Decks copied from the example call the
+   CLI as `node ../cli.mjs`, which is right only next to PinDeck: that becomes this server's command. */
 function deckInstructions() {
-  try { return `\n\n## The deck's CLAUDE.md\n${fs.readFileSync(path.join(DECK_DIR, "CLAUDE.md"), "utf8").trim()}\n`; }
-  catch { return ""; }
+  let s;
+  try { s = fs.readFileSync(path.join(DECK_DIR, "CLAUDE.md"), "utf8").trim(); } catch { return ""; }
+  return `\n\n## The deck's CLAUDE.md\n${s.replace(/node \.\.\/cli\.mjs\b/g, () => CLI_CMD)}\n`;
 }
 let stderrTail = "";
 const session = new ClaudeSession({

@@ -320,6 +320,21 @@ test("Read-only deck folder: refused before anything is written", { skip: proces
   assert.match(r.output, /not writable/);
 });
 
+/* ---- Deck instructions ------------------------------------------------------------------------ */
+test("The deck's CLAUDE.md reaches Claude with this server's CLI command, wherever the deck is", async (t) => {
+  const fx = fixture(t);
+  assert.doesNotMatch(fs.readFileSync(path.join(fx.deck, "CLAUDE.md"), "utf8"), /\.\.\/cli\.mjs/, "the example names no path");
+  // a deck made from an older copy of the example, in a folder far from PinDeck
+  fs.appendFileSync(path.join(fx.deck, "CLAUDE.md"), "\n- Old rule: run `node ../cli.mjs layout 3` after edits.\n");
+  await startServer(t, fx);
+  const a = (await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start")).argv;
+  const prompt = a[a.indexOf("--append-system-prompt") + 1];
+  const cli = cliCommand(path.relative(fx.deck, path.join(ROOT, "cli.mjs")).split(path.sep).join("/"));
+  assert.match(prompt, /## The deck's CLAUDE\.md/);
+  assert.ok(prompt.includes(`- Old rule: run \`${cli} layout 3\` after edits.`));
+  assert.doesNotMatch(prompt, /node \.\.\/cli\.mjs/);
+});
+
 /* ---- Deck files ------------------------------------------------------------------------------- */
 test("Deck media: length, byte ranges (Safari needs 206), 416 for bad ranges, audio types", async (t) => {
   const fx = fixture(t);

@@ -23,14 +23,15 @@ none between rows; text left, numbers right. Add `compact` for wide or long tabl
 
 ## Element ids (`data-eid`)
 
-When the deck is opened in PinDeck (one folder up), every slide and visible element gets a
+When the deck is opened in PinDeck, every slide and visible element gets a
 `data-eid` attribute. Keep ids unchanged when editing an element. Give new elements
 `data-eid="<slide-id>/<short-name>"` and new slides a new id (a slug of the title).
 
 ## Checking layout
 
-When PinDeck is running (`node ../server.mjs .`):
+When the deck is open in PinDeck, use the PinDeck CLI command given in the system prompt
+(written `<cli>` here):
 
-- `node ../cli.mjs layout <slide-id or number>`: measured boxes, font sizes and layout issues.
-- `node ../cli.mjs shot <slide-id or number>`: PNG screenshot; prints the path.
-- `node ../cli.mjs slides`: slide numbers and ids.
+- `<cli> layout <slide-id or number>`: measured boxes, font sizes and layout issues.
+- `<cli> shot <slide-id or number>`: PNG screenshot; prints the path.
+- `<cli> slides`: slide numbers and ids.

@@ -86,8 +86,9 @@ cp -R ocean-example my-template
    `pindeck:footer-top` and `pindeck:locked` meta tags if the footer or the brand elements move.
    `deck.js` holds the math macros, the footer markup and the audio player.
 4. **`README.md` and `CLAUDE.md`:** Claude follows both, so describe the new classes and rules there.
-   The example's `CLAUDE.md` calls `../cli.mjs` and `../server.mjs`; fix these paths if the template
-   does not sit next to PinDeck.
+   Refer to PinDeck's commands as "the PinDeck CLI command given in the system prompt", as the
+   example's `CLAUDE.md` does; PinDeck tells Claude the right path wherever the deck is. An older
+   `node ../cli.mjs` in a deck's `CLAUDE.md` is replaced with that command.
 
 **New slide** and the PowerPoint import model new slides on the deck's own: keep a slide with class
 `title-slide`, one with `section-slide`, and a content slide with `.slide-head` (`h2`, optionally a
@@ -255,7 +256,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **Layout instead of screenshots.** With each message the editor measures the current slide and
   every pinned slide in your browser: position and size of every element, font sizes, and issues
   (content below the footer rule, outside the slide, overlaps, clipped text). Claude gets this as
-  text. To check its own work it runs `node ../cli.mjs layout <slide>...` (`--issues` for the
+  text. To check its own work it runs the PinDeck CLI's `layout <slide>...` (`--issues` for the
   issues only). Screenshots are
   only taken when you tick the box or Claude needs a visual judgement.
 * **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
