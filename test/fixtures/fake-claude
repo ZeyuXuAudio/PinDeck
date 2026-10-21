@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+/* A stand-in for the claude CLI in stream-json mode, for tests: no network, no login, no AI.
+
+   FAKE_CLAUDE_LOG   a file to append one JSON line per event to (start with argv and cwd, input, signals)
+   FAKE_CLAUDE_MODE  "ok" (default): answers each message, appending a comment to theme.css when the
+                     message contains "edit theme";
+                     "auth-fail": prints a login error and exits 1;
+                     "stubborn": ignores end of input and SIGTERM (only SIGKILL stops it);
+                     "garbage": writes malformed and partial lines before each answer */
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
+
+const mode = process.env.FAKE_CLAUDE_MODE || "ok";
+const logFile = process.env.FAKE_CLAUDE_LOG;
+const log = (o) => { if (logFile) fs.appendFileSync(logFile, JSON.stringify({ pid: process.pid, ...o }) + "\n"); };
+const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+log({ event: "start", argv: process.argv.slice(2), cwd: process.cwd(), url: process.env.DECK_EDITOR_URL || null });
+
+if (mode === "auth-fail") {
+  process.stderr.write("Invalid API key · Please run /login\n");
+  process.exit(1);
+}
+const session = "fake-session-1";
+out({ type: "system", subtype: "init", session_id: session, model: "fake-model" });
+
+process.on("SIGTERM", () => {
+  log({ event: "sigterm" });
+  if (mode !== "stubborn") process.exit(143);
+});
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  log({ event: "input", type: msg.type, subtype: msg.request?.subtype });
+  if (msg.type !== "user") return;
+  const text = (msg.message?.content || []).map((c) => c.text || "").join(" ");
+  if (mode === "garbage") process.stdout.write("not json\n{\"type\":\"assist");   // a partial line, completed below
+  if (mode === "garbage") process.stdout.write("\n");
+  if (/edit theme/.test(text)) fs.appendFileSync(path.join(process.cwd(), "theme.css"), "\n/* fake claude edit */\n");
+  out({ type: "assistant", session_id: session, message: { content: [{ type: "text", text: "Done (fake)." }] } });
+  out({ type: "result", subtype: "success", is_error: false, session_id: session, total_cost_usd: 0, duration_ms: 1 });
+}).on("close", () => {
+  log({ event: "eof" });
+  if (mode !== "stubborn") process.exit(0);
+});
+if (mode === "stubborn") setInterval(() => {}, 1000);

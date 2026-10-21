@@ -6,7 +6,8 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-for (const platform of ['win32','linux']) test(`source startup on ${platform} shows notice without touching deck or state`, async t => {
+// Linux is supported since 2.9 (see server.test.mjs); other systems still get the notice and nothing else.
+for (const platform of ['win32','freebsd']) test(`source startup on ${platform} shows notice without touching deck or state`, async t => {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pindeck-platform-'));
  const state=path.join(dir,'state');
  const preload=path.join(dir,'platform.mjs');fs.writeFileSync(preload,`Object.defineProperty(process,'platform',{value:${JSON.stringify(platform)}});`);
@@ -20,7 +21,8 @@ for (const platform of ['win32','linux']) test(`source startup on ${platform} sh
   child.stdout.on('data',d=>{out+=d;const match=out.match(/http:\/\/127\.0\.0\.1:\d+\//);if(match){clearTimeout(timer);resolve(match[0]);}});
  });
  const response=await fetch(url);assert.equal(response.status,200);const html=await response.text();
- assert.match(html,platform==='win32'?/Windows support is on the roadmap/:/requires macOS/);
+ assert.match(html,platform==='win32'?/Windows support is on the roadmap/:/runs on macOS and Linux/);
+ assert.doesNotMatch(html,/requires macOS/);
  assert.match(html,/deck has not been opened or changed/);
  assert.equal((await fetch(url+'api/message',{method:'POST',body:'{}'})).status,405);
  assert.equal(fs.existsSync(state),false);

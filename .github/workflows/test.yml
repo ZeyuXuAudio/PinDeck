@@ -1,0 +1,31 @@
+# Tests on real Linux and macOS, Node 22 and 24. The tests start PinDeck servers on copies of the example
+# deck with a fake claude (test/fixtures/fake-claude): no Claude login, no network, no AI.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
+      - name: Record the system
+        run: uname -srm && node --version && git --version
+      - run: npm test
