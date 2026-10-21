@@ -39,7 +39,11 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
    shims for macOS-only tools that record any call. */
 function fixture(t, deckName = `deck with spaces 'and' "quotes"`) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pindeck test "));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stops = [];   // servers of this test: stopped before the folder goes, or they write into it meanwhile
+  t.after(async () => {
+    for (const stop of stops) await stop().catch(() => {});
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const deck = path.join(root, deckName);
   fs.cpSync(EXAMPLE, deck, { recursive: true });
   const shims = path.join(root, "shims");
@@ -47,7 +51,7 @@ function fixture(t, deckName = `deck with spaces 'and' "quotes"`) {
   for (const tool of ["osascript", "afconvert"]) {
     fs.writeFileSync(path.join(shims, tool), `#!/bin/sh\necho "$0 $*" >> "${path.join(root, "mac-tools.log")}"\nexit 1\n`, { mode: 0o755 });
   }
-  return { root, deck, home: path.join(root, "state"), log: path.join(root, "claude.log"), shims,
+  return { root, deck, home: path.join(root, "state"), log: path.join(root, "claude.log"), shims, stops,
     macTools: () => fs.existsSync(path.join(root, "mac-tools.log")) ? fs.readFileSync(path.join(root, "mac-tools.log"), "utf8") : "" };
 }
 
@@ -73,7 +77,7 @@ function spawnServer(fx, { platform = REAL, env = {}, args = ["--port", "0"], de
 
 async function startServer(t, fx, opts = {}) {
   const s = spawnServer(fx, opts);
-  t.after(async () => {
+  fx.stops.push(async () => {
     if (s.child.exitCode === null && s.child.signalCode === null) { s.child.kill("SIGKILL"); await s.exited; }
     for (const pid of fakePids(fx)) if (alive(pid)) process.kill(pid, "SIGKILL");
   });
@@ -289,7 +293,7 @@ test("Restart: a new token; the old one is refused (the editor reloads on 403)",
 async function failedStart(t, fx, opts) {
   const before = sha(path.join(fx.deck, "index.html"));
   const s = spawnServer(fx, opts);
-  t.after(() => s.child.kill("SIGKILL"));
+  fx.stops.push(async () => s.child.kill("SIGKILL"));
   const r = await Promise.race([s.exited, sleep(10000).then(() => ({ code: "timeout" }))]);
   assert.equal(sha(path.join(fx.deck, "index.html")), before, "deck unchanged");
   assert.equal(fs.existsSync(fx.home), false, "no state written");
