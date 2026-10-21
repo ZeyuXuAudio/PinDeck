@@ -36,18 +36,23 @@ import { isSupportedPlatform, detectCapabilities, publicCapabilities, capability
 import { writeAtomic, sameContent, revision, scanFiles, scanChanges } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
-const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--model <name>]
+const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--model <name>] [--asset-root <folder>]...
        pindeck login [deck-folder | deck-file.html]
 
 Opens a reveal.js deck in PinDeck: a deck file such as talk.html, or a folder (default: the current
 folder), which then opens its index.html.
 login prints a new one-time login link for the PinDeck running for that deck
-(without a deck: for the PinDeck started last).`;
+(without a deck: for the PinDeck started last).
+--asset-root lets the deck use files outside its folder: a folder that contains the deck (paths such as
+../shared/style.css then work), or one that symlinks in the deck may point to. Repeatable; also
+"assetRoots" in ~/.pindeck/config.json.`;
 const EDITOR_DIR = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
 const opt = (name, dflt) => { const i = argv.indexOf(name); return i >= 0 ? argv.splice(i, 2)[1] : dflt; };
 const portArg = opt("--port", process.env.PORT || 5180);
+const assetArgs = [];
+for (let a; (a = opt("--asset-root")) !== undefined;) assetArgs.push(a);
 let PORT = parsePort(portArg);   // the port actually bound once listening (--port 0 picks a free one)
 if (PORT === null) { console.error(`Invalid port "${portArg}": use a number from 1 to 65535.\n\n${USAGE}`); process.exit(2); }
 if (!isSupportedPlatform(process.platform)) {
@@ -294,7 +299,7 @@ function chrome(args, done) {
   });
 }
 const deckUrl = (mode, params = {}) =>
-  `${ORIGIN}/deck/${encodeURIComponent(DECK_FILE)}?` + new URLSearchParams({ editor: mode, showHiddenSlides: "true", ...params });
+  `${ORIGIN}${DECK_PAGE}?` + new URLSearchParams({ editor: mode, showHiddenSlides: "true", ...params });
 async function takeShot(slide) {
   const pins = state.pins.filter((p) => p.slide.eid === slide.eid).map((p) => ({ n: p.n, eid: p.eid, at: p.at, point: p.point }));
   const out = path.join(SHOT_DIR, `${slide.eid.replace(/[^\w-]/g, "_")}-${Date.now()}.png`);
@@ -338,7 +343,7 @@ const measure = (slide) => measureInEditor(slide).catch((e) => {
    presentation: one page per build step (a slide with two clicks gives three pages).
    Files go to <deck>/export/. One export at a time. */
 let exportQueue = Promise.resolve(), snapSeq = 0;
-const snapshots = new Map();   // id -> static print layout, served at /deck/__pindeck-print-<id>.html
+const snapshots = new Map();   // id -> static print layout, served next to the deck page as __pindeck-print-<id>.html
 function exportPdf(kind, includeHidden = false) {
   if (!CAPS.pdfExport.available) return Promise.reject(Object.assign(new Error(`PDF export is not available: ${CAPS.pdfExport.reason}.`), { status: 501 }));
   const split = kind === "presentation";
@@ -349,10 +354,10 @@ function exportPdf(kind, includeHidden = false) {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     const layoutProfile = profile("layout"), printProfile = profile("print");
     const html = await printLayout(CHROME, chromeStart(layoutProfile,
-      `${ORIGIN}/deck/${encodeURIComponent(DECK_FILE)}?editor=pdf&print-pdf&pdfSeparateFragments=${split}&showHiddenSlides=${!!includeHidden}`), layoutProfile);
+      `${ORIGIN}${DECK_PAGE}?editor=pdf&print-pdf&pdfSeparateFragments=${split}&showHiddenSlides=${!!includeHidden}`), layoutProfile);
     const id = `${process.pid}-${++snapSeq}`;
     snapshots.set(id, html);
-    try { await printPdf(CHROME, chromeStart(printProfile, `${ORIGIN}/deck/__pindeck-print-${id}.html`), out, printProfile); }
+    try { await printPdf(CHROME, chromeStart(printProfile, `${ORIGIN}${DECK_BASE}__pindeck-print-${id}.html`), out, printProfile); }
     finally { snapshots.delete(id); }
     return { kind: split ? "presentation" : "handout", path: out, rel: path.relative(DECK_DIR, out),
       url: `/deck/export/${encodeURIComponent(name)}`, bytes: fs.statSync(out).size };
@@ -408,6 +413,37 @@ if (MODELS.includes(fileConfig.model)) settings.model = fileConfig.model;
 else if (fileConfig.model !== undefined) console.warn(`config.json: unknown model "${fileConfig.model}" (use ${MODELS.join(" or ")}); using ${DEFAULTS.model}.`);
 if (EFFORTS.includes(fileConfig.effort)) settings.effort = fileConfig.effort;
 else if (fileConfig.effort !== undefined) console.warn(`config.json: unknown effort "${fileConfig.effort}" (use ${EFFORTS.join(", ")}); using ${DEFAULTS.effort}.`);
+/* Asset roots (--asset-root, and "assetRoots" in config.json): folders outside the deck whose files the
+   deck may use. The outermost one that contains the deck is served at /files/, with the deck page inside
+   it, so a relative path such as ../shared/style.css reaches its file. Every file served, from the deck
+   or from /files/, must really lie (after following symlinks) inside the deck folder or an asset root:
+   a symlink that leads anywhere else is refused. */
+const expandHome = (p) => (p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p);
+const ASSET_ROOTS = [...assetArgs, ...(Array.isArray(fileConfig.assetRoots) ? fileConfig.assetRoots : [])].map((r) => {
+  const abs = path.resolve(expandHome(String(r)));
+  let st = null;
+  try { st = fs.statSync(abs); } catch {}
+  if (!st?.isDirectory()) { console.error(`Asset root ${abs} is not a folder.\n\n${USAGE}`); process.exit(2); }
+  return abs;
+});
+const within = (dir, p) => p === dir || p.startsWith(dir + path.sep);
+const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+const SERVE_ROOT = ASSET_ROOTS.filter((r) => within(r, DECK_DIR)).sort((a, b) => a.length - b.length)[0] || null;
+const ALLOWED_REAL = [DECK_DIR, ...ASSET_ROOTS].map(realOr);
+const encPath = (rel) => rel.split(path.sep).filter(Boolean).map(encodeURIComponent).join("/");
+/* The deck page's URL, and the folder URL its relative paths resolve against */
+const DECK_PAGE = SERVE_ROOT ? `/files/${[encPath(path.relative(SERVE_ROOT, DECK_DIR)), encodeURIComponent(DECK_FILE)].filter(Boolean).join("/")}`
+  : `/deck/${encodeURIComponent(DECK_FILE)}`;
+const DECK_BASE = DECK_PAGE.slice(0, DECK_PAGE.lastIndexOf("/") + 1);
+/* A file to serve: inside its base by path, and inside the deck or an asset root once symlinks are
+   followed. null: refuse. A missing file passes, and is answered 404. */
+function servable(base, rel) {
+  const f = safeJoin(base, rel);
+  if (!f) return null;
+  let real;
+  try { real = fs.realpathSync(f); } catch { return f; }
+  return ALLOWED_REAL.some((d) => within(d, real)) ? f : null;
+}
 const saveSettings = () => fs.writeFile(CONFIG_FILE, JSON.stringify({ ...fileConfig, model: settings.model, effort: settings.effort }, null, 2) + "\n", () => {});
 const completeSettings = () => {   // create or complete the file (at start, once the port is bound)
   if (fileConfig.model !== settings.model || fileConfig.effort !== settings.effort) saveSettings();
@@ -424,7 +460,10 @@ const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md
   .replaceAll("{{CLI}}", CLI_CMD).replaceAll("{{DECK}}", DECK_FILE) + capabilityPrompt(CAPS, CLI_CMD) +
   // a template's own notes usually say index.html; other decks may share this folder
   (NAMED ? `\n\n## This deck's file\nThe slides are in ${DECK_FILE}. Where the deck's notes below say index.html, they mean ` +
-    `${DECK_FILE}. Other .html files in this folder are other decks: do not edit them.\n` : "");
+    `${DECK_FILE}. Other .html files in this folder are other decks: do not edit them.\n` : "") +
+  (ASSET_ROOTS.length ? `\n\n## Files outside the deck folder\nThe deck may use files in ${ASSET_ROOTS.join(", ")}: refer to ` +
+    `them with paths relative to ${DECK_FILE} (such as ../shared/style.css). You can read them; do not edit them, ` +
+    `other decks may use them too.\n` : "");
 /* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
    or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
    MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
@@ -1078,17 +1117,25 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(path.join(EDITOR_DIR, "public"), p.slice(8));
       return f ? serveFile(res, f, null, req) : text(res, 403, "Forbidden");
     }
-    if (p.startsWith("/deck/") && !ok) return text(res, 403, "Not logged in");
+    if ((p.startsWith("/deck/") || p.startsWith("/files/")) && !ok) return text(res, 403, "Not logged in");
     let snap;
-    if (req.method === "GET" && (snap = p.match(/^\/deck\/__pindeck-print-([\w-]+)\.html$/))) {
+    if (req.method === "GET" && (snap = p.match(/^\/(?:deck|files)\/(?:.*\/)?__pindeck-print-([\w-]+)\.html$/))) {
       const html = snapshots.get(snap[1]);
       if (!html) return text(res, 404, "Not found");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return res.end(html);
     }
-    if (req.method === "GET" && p.startsWith("/deck/")) {
-      const f = safeJoin(DECK_DIR, p.slice(6) || DECK_FILE);
-      if (!f) return text(res, 403, "Forbidden");
+    // /deck/: the deck folder; /deck/ alone is the deck page. With an asset root the page lives under
+    // /files/, so that ../ paths reach the root: /deck/ alone redirects there.
+    if (req.method === "GET" && p === "/deck/" && SERVE_ROOT) {
+      res.writeHead(302, { location: DECK_PAGE + url.search, "cache-control": "no-store" });
+      return res.end();
+    }
+    const deckPath = req.method === "GET" && (p.startsWith("/deck/") ? servable(DECK_DIR, p.slice(6) || DECK_FILE)
+      : p.startsWith("/files/") && SERVE_ROOT ? servable(SERVE_ROOT, p.slice(7)) : undefined);
+    if (deckPath === null) return text(res, 403, "Forbidden");
+    if (deckPath) {
+      const f = deckPath;
       const mode = url.searchParams.get("editor");
       if (!mode || !/\.html?$/i.test(f)) return serveFile(res, f, null, req);
       return serveFile(res, f, (s) => {

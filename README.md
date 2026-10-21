@@ -115,6 +115,18 @@ plain players.
 chat header's menu is written to this file, so it always shows what PinDeck uses. Edit it while
 PinDeck is stopped, or simply use the menu.
 
+### Files outside the deck folder
+
+A deck can use files from a folder around it, such as a style sheet or figures shared by several
+talks: start PinDeck with `--asset-root <folder>` (repeatable), or list the folders in config.json as
+`"assetRoots": ["~/talks"]`. When the folder contains the deck, PinDeck serves the deck from inside
+it, so relative paths such as `../shared/style.css` work, in the editor, in screenshots and in PDF
+exports. Claude may read those files but does not edit them.
+
+Symlinks: PinDeck serves a file only if, with symlinks followed, it lies inside the deck folder or an
+asset root. A symlink in the deck that leads anywhere else is refused (403). To use a symlinked
+library folder, add the folder it points to as an asset root; it does not have to contain the deck.
+
 ## Running on a Linux server (beta)
 
 PinDeck can run on a Linux machine where the deck lives, with the editor in your Mac's browser. The

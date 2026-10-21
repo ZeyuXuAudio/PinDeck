@@ -386,6 +386,66 @@ test("Missing deck file: exits with its name, nothing written; a folder named li
   assert.equal((await s.api("status")).data.deckFile, "index.html");
 });
 
+/* ---- Files outside the deck folder (--asset-root) and symlinks ----------------------------------- */
+test("Asset root: the deck is served inside it, so ../ paths work; nothing outside it", async (t) => {
+  const fx = fixture(t);
+  fs.mkdirSync(path.join(fx.root, "shared"));
+  fs.writeFileSync(path.join(fx.root, "shared", "extra.css"), "/* shared */\n");
+  const s = await startServer(t, fx, { args: ["--port", "0", "--asset-root", fx.root] });
+  const auth = { "x-editor-token": s.token };
+  const page = `/files/${encodeURIComponent(path.basename(fx.deck))}/index.html`;
+  // the editor asks for /deck/ and is sent to the page inside the root, with its query
+  const r = await fetch(`${s.url}/deck/?editor=main&x=1`, { headers: auth, redirect: "manual" });
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get("location"), `${page}?editor=main&x=1`);
+  const html = await (await fetch(`${s.url}${page}?editor=main`, { headers: auth })).text();
+  assert.match(html, /<script src="\/editor\/bridge\.js"><\/script>/);
+  // ../shared/extra.css from the deck page
+  const css = new URL("../shared/extra.css", s.url + page).pathname;
+  assert.equal(css, "/files/shared/extra.css");
+  assert.equal(await (await fetch(s.url + css, { headers: auth })).text(), "/* shared */\n");
+  assert.equal((await fetch(s.url + css)).status, 403, "login needed");
+  assert.notEqual((await fetch(`${s.url}/files/..%2f..%2fetc%2fpasswd`, { headers: auth })).status, 200);
+  // the deck's own files are still at /deck/ (attachments, exports)
+  assert.equal((await fetch(`${s.url}/deck/theme.css`, { headers: auth })).status, 200);
+  const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
+  const prompt = start.argv[start.argv.indexOf("--append-system-prompt") + 1];
+  assert.ok(prompt.includes(`## Files outside the deck folder\nThe deck may use files in ${fx.root}`));
+});
+
+test("Symlinks: served only when they lead into the deck or an asset root", { skip: process.platform === "win32" }, async (t) => {
+  const fx = fixture(t);
+  const outside = path.join(fx.root, "outside"), library = path.join(fx.root, "library");
+  for (const d of [outside, library]) { fs.mkdirSync(d); fs.writeFileSync(path.join(d, "x.css"), `/* ${path.basename(d)} */\n`); }
+  fs.symlinkSync(path.join(outside, "x.css"), path.join(fx.deck, "escape.css"));
+  fs.symlinkSync(path.join(library, "x.css"), path.join(fx.deck, "lib.css"));
+  fs.symlinkSync(path.join(fx.deck, "theme.css"), path.join(fx.deck, "inside.css"));
+  const get = async (s, p) => (await fetch(`${s.url}/deck/${p}`, { headers: { "x-editor-token": s.token } })).status;
+  const s = await startServer(t, fx);
+  assert.equal(await get(s, "escape.css"), 403, "a symlink out of the deck");
+  assert.equal(await get(s, "lib.css"), 403);
+  assert.equal(await get(s, "inside.css"), 200, "a symlink within the deck");
+  await s.killAll();
+  // library as an asset root that does not contain the deck: symlinks may lead into it, nothing more
+  const s2 = await startServer(t, fx, { args: ["--port", "0", "--asset-root", library] });
+  assert.equal(await get(s2, "lib.css"), 200);
+  assert.equal(await get(s2, "escape.css"), 403);
+  assert.equal((await fetch(`${s2.url}/deck/`, { headers: { "x-editor-token": s2.token }, redirect: "manual" })).status, 200, "no redirect: the root does not contain the deck");
+});
+
+test("Asset roots from config.json; a missing one stops the start before anything is written", async (t) => {
+  const fx = fixture(t);
+  const r = await failedStart(t, fx, { args: ["--port", "0", "--asset-root", path.join(fx.root, "nope")] });
+  assert.equal(r.code, 2);
+  assert.match(r.output, /Asset root .*nope is not a folder/);
+  fs.mkdirSync(fx.home, { recursive: true });
+  fs.writeFileSync(path.join(fx.home, "config.json"), JSON.stringify({ assetRoots: [fx.root] }));
+  const s = await startServer(t, fx);
+  const res = await fetch(`${s.url}/deck/`, { headers: { "x-editor-token": s.token }, redirect: "manual" });
+  assert.equal(res.status, 302);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(fx.home, "config.json"), "utf8")).assetRoots, "kept in config.json");
+});
+
 /* ---- Named deck files (talk.html), several in one folder ---------------------------------------- */
 test("A named deck file: served, edited, given ids and permissions, with state of its own beside index.html", async (t) => {
   const fx = fixture(t);
