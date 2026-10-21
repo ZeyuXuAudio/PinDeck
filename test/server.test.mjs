@@ -13,7 +13,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { cliCommand } from "../lib/capabilities.mjs";
 
@@ -79,8 +79,9 @@ async function startServer(t, fx, opts = {}) {
   });
   const url = await waitFor(() => /PinDeck: (http:\/\/127\.0\.0\.1:\d+)\//.exec(s.output())?.[1] ||
     (s.child.exitCode !== null && Promise.reject(new Error("server exited: " + s.output()))), "the server to start");
-  const html = await (await fetch(url + "/")).text();
-  const token = /name="editor-token" content="([0-9a-f]+)"/.exec(html)[1];
+  // the token is only in the server's own files (0600), never in a page
+  const token = await waitFor(() => serverInfo(fx, s.child.pid)?.token, "the server file");
+  const login = /PinDeck: (http:\/\/\S+\/login\?code=[0-9a-f]+)/.exec(s.output())[1];
   const api = async (p, body, headers = {}) => {
     const res = await fetch(`${url}/api/${p}`, {
       method: body === undefined ? "GET" : "POST", body: body === undefined ? undefined : JSON.stringify(body),
@@ -90,7 +91,14 @@ async function startServer(t, fx, opts = {}) {
     try { data = JSON.parse(raw); } catch {}
     return { status: res.status, data, rev: res.headers.get("x-deck-rev") };
   };
-  return { ...s, url, token, api, port: +new URL(url).port };
+  return { ...s, url, token, login, api, port: +new URL(url).port };
+}
+function serverInfo(fx, pid) {
+  const dir = path.join(fx.home, "decks");
+  for (const d of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+    try { const info = JSON.parse(fs.readFileSync(path.join(dir, d, "server.json"), "utf8")); if (info.pid === pid) return info; } catch {}
+  }
+  return null;
 }
 const fakeLog = (fx) => fs.existsSync(fx.log) ? fs.readFileSync(fx.log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 const fakePids = (fx) => [...new Set(fakeLog(fx).filter((e) => e.event === "start").map((e) => e.pid))];
@@ -321,11 +329,12 @@ test("Read-only deck folder: refused before anything is written", { skip: proces
 });
 
 /* ---- Deck instructions ------------------------------------------------------------------------ */
-test("The deck's CLAUDE.md reaches Claude with this server's CLI command, wherever the deck is", async (t) => {
+test("The deck's CLAUDE.md and AGENTS.md reach Claude with this server's CLI command, wherever the deck is", async (t) => {
   const fx = fixture(t);
   assert.doesNotMatch(fs.readFileSync(path.join(fx.deck, "CLAUDE.md"), "utf8"), /\.\.\/cli\.mjs/, "the example names no path");
   // a deck made from an older copy of the example, in a folder far from PinDeck
   fs.appendFileSync(path.join(fx.deck, "CLAUDE.md"), "\n- Old rule: run `node ../cli.mjs layout 3` after edits.\n");
+  fs.writeFileSync(path.join(fx.deck, "AGENTS.md"), "# Agents\n\nUse British spelling.\n");
   await startServer(t, fx);
   const a = (await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start")).argv;
   const prompt = a[a.indexOf("--append-system-prompt") + 1];
@@ -333,6 +342,8 @@ test("The deck's CLAUDE.md reaches Claude with this server's CLI command, wherev
   assert.match(prompt, /## The deck's CLAUDE\.md/);
   assert.ok(prompt.includes(`- Old rule: run \`${cli} layout 3\` after edits.`));
   assert.doesNotMatch(prompt, /node \.\.\/cli\.mjs/);
+  assert.match(prompt, /## The deck's AGENTS\.md\n# Agents\n\nUse British spelling\./);
+  assert.ok(prompt.indexOf("The deck's CLAUDE.md") < prompt.indexOf("The deck's AGENTS.md"));
 });
 
 /* ---- Deck files ------------------------------------------------------------------------------- */
@@ -340,7 +351,7 @@ test("Deck media: length, byte ranges (Safari needs 206), 416 for bad ranges, au
   const fx = fixture(t);
   const s = await startServer(t, fx);
   const wav = fs.readFileSync(path.join(fx.deck, "figures/sample_a.wav"));
-  const get = (p, headers = {}) => fetch(`${s.url}/deck/${p}`, { headers });
+  const get = (p, headers = {}) => fetch(`${s.url}/deck/${p}`, { headers: { "x-editor-token": s.token, ...headers } });
 
   let r = await get("figures/sample_a.wav");
   assert.equal(r.status, 200);
@@ -394,8 +405,8 @@ test("Loopback only; bad host, token and origin are refused", async (t) => {
     "x-editor-token": s.token, origin: "http://evil.example", "content-type": "application/json" } }), 403);
   assert.equal(await raw(s.port, { p: "/api/status", headers: { host: `localhost:${s.port}`, "x-editor-token": s.token } }), 200);
   // a tunnel on another local port: any port, but only the loopback names, and the Origin must match the Host
-  assert.equal(await raw(s.port, { p: "/", headers: { host: "localhost:8080" } }), 200);
-  assert.equal(await raw(s.port, { p: "/", headers: { host: "127.0.0.1" } }), 200);
+  assert.equal(await raw(s.port, { p: "/", headers: { host: "localhost:8080", "x-editor-token": s.token } }), 200);
+  assert.equal(await raw(s.port, { p: "/", headers: { host: "127.0.0.1", "x-editor-token": s.token } }), 200);
   for (const host of ["evil.example", "127.0.0.1.evil.example:8080", "localhost:8080@evil.example", "localhost:abc", "localhost.:8080"])
     assert.equal(await raw(s.port, { p: "/", headers: { host } }), 403, host);
   const post = (host, origin) => raw(s.port, { method: "POST", p: "/api/notes", headers: { host, origin,
@@ -411,6 +422,110 @@ test("Loopback only; bad host, token and origin are refused", async (t) => {
     const ok = await new Promise((r) => net.connect(s.port, lan.address).on("connect", function () { this.destroy(); r(true); }).on("error", () => r(false)));
     assert.equal(ok, false);
   }
+});
+
+test("No token in any page; the editor, deck and API need a login cookie or the header", async (t) => {
+  const fx = fixture(t);
+  const s = await startServer(t, fx);
+  for (const p of ["/", "/index.html"]) {
+    const r = await fetch(s.url + p);
+    assert.equal(r.status, 403, p);
+    const page = await r.text();
+    assert.match(page, /pindeck login/);
+    assert.ok(!page.includes(s.token));
+  }
+  assert.equal((await fetch(`${s.url}/deck/index.html`)).status, 403);
+  assert.equal((await fetch(`${s.url}/deck/figures/sample_a.wav`)).status, 403);
+  assert.equal((await fetch(`${s.url}/api/status?t=${s.token}`)).status, 403, "no token in URLs");
+  assert.equal((await fetch(`${s.url}/editor/editor.css`)).status, 200, "the editor's own files hold nothing secret");
+  const editor = await (await fetch(s.url + "/", { headers: { "x-editor-token": s.token } })).text();
+  assert.ok(!editor.includes(s.token) && !editor.includes("%%TOKEN%%"));
+});
+
+test("Login link: works once, sets an HttpOnly SameSite=Strict cookie named after the port", async (t) => {
+  const fx = fixture(t);
+  const s = await startServer(t, fx);
+  const r = await fetch(s.login);
+  assert.equal(r.status, 200);
+  const set = r.headers.get("set-cookie");
+  assert.equal(set, `pindeck-${s.port}=${s.token}; HttpOnly; SameSite=Strict; Path=/`);
+  assert.match(await r.text(), /location\.replace\("\/"\)/);
+  assert.equal((await fetch(s.login)).status, 403, "a code works once");
+  assert.equal((await fetch(`${s.url}/login?code=${"0".repeat(32)}`)).status, 403);
+
+  const jar = { cookie: `other=1; pindeck-${s.port}=${s.token}` };
+  assert.equal((await fetch(s.url + "/", { headers: jar })).status, 200);
+  assert.equal((await fetch(`${s.url}/deck/index.html?editor=1`, { headers: jar })).status, 200);
+  assert.equal((await fetch(`${s.url}/api/status`, { headers: jar })).status, 200);
+  assert.equal((await fetch(`${s.url}/api/notes`, { method: "POST", body: "{}",
+    headers: { ...jar, origin: s.url, "content-type": "application/json" } })).status !== 403, true);
+  // another server's cookie (another port) or a wrong token are refused
+  assert.equal((await fetch(s.url + "/", { headers: { cookie: `pindeck-${s.port + 1}=${s.token}` } })).status, 403);
+  assert.equal((await fetch(s.url + "/", { headers: { cookie: `pindeck-${s.port}=${"0".repeat(32)}` } })).status, 403);
+
+  // a new link from the API (what pindeck login uses); next stays on this server
+  const link = async (next) => {
+    const { url } = (await s.api("login-link")).data;
+    return (await fetch(url + "&" + new URLSearchParams({ next }))).text();
+  };
+  assert.match(await link("/deck/index.html?editor=shot&slide=a"), /location\.replace\("\/deck\/index\.html\?editor=shot&slide=a"\)/);
+  for (const next of ["//evil.example/", "https://evil.example/", "/\\evil.example"])
+    assert.match(await link(next), /location\.replace\("\/"\)/, next);
+  assert.match(await link("/</script><script>alert(1)"), /\\u003c\/script>/, "no way out of the script");
+});
+
+test("pindeck login prints a working link for the deck's server, and says so when none runs", async (t) => {
+  const fx = fixture(t);
+  const env = { ...process.env, PINDECK_HOME: fx.home };
+  const none = spawnSync(process.execPath, [SERVER, "login", fx.deck], { env, encoding: "utf8" });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /No PinDeck is running/);
+  const s = await startServer(t, fx);
+  for (const args of [["login", fx.deck], ["login"]]) {
+    const r = spawnSync(process.execPath, [SERVER, ...args], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const url = /(http:\/\/127\.0\.0\.1:\d+\/login\?code=[0-9a-f]{32})/.exec(r.stdout)[1];
+    assert.ok(!r.stdout.includes(s.token));
+    assert.equal((await fetch(url)).status, 200);
+  }
+});
+
+/* ---- Real Chrome (PINDECK_TEST_CHROME=<path to Chrome>; CI sets it on Linux and macOS) -------- */
+const REAL_CHROME = process.env.PINDECK_TEST_CHROME;
+test("Real Chrome: screenshot, headless layout and PDF export through the login, no secret in its arguments",
+  { skip: !REAL_CHROME && "set PINDECK_TEST_CHROME to a Chrome or Chromium executable", timeout: 240000 }, async (t) => {
+  const fx = fixture(t);
+  // a shim that records Chrome's arguments, as `ps` would show them to other users
+  const argsLog = path.join(fx.root, "chrome-args.log");
+  const shim = path.join(fx.shims, "chrome");
+  fs.writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${argsLog}'\nexec '${REAL_CHROME}' "$@"\n`, { mode: 0o755 });
+  const s = await startServer(t, fx, { env: { CHROME_BIN: shim } });
+  const st = (await s.api("status")).data;
+  assert.equal(st.capabilities.screenshot.available, true, st.capabilities.screenshot.reason);
+
+  const shot = await s.api("shot?slide=2");
+  assert.equal(shot.status, 200, String(shot.data));
+  const png = String(shot.data).trim();
+  const img = fs.readFileSync(png);
+  assert.equal(img.subarray(1, 4).toString(), "PNG");
+  assert.equal(img.readUInt32BE(16), 1280);
+  assert.ok(img.length > 20000, "a rendered slide, not a login page");
+
+  const layout = await s.api("layout?slide=2");   // no editor tab: headless Chrome
+  assert.equal(layout.status, 200, String(layout.data));
+  assert.match(String(layout.data), /Motivation/);
+
+  for (const kind of ["handout", "presentation"]) {
+    const pdf = await s.api(`pdf?slide=${kind}`);
+    assert.equal(pdf.status, 200, String(pdf.data));
+    const file = path.join(fx.deck, "export", `${path.basename(fx.deck)}-${kind}.pdf`);
+    assert.equal(fs.readFileSync(file).subarray(0, 5).toString(), "%PDF-");
+    assert.ok(fs.statSync(file).size > 100000, `${kind}: slides, not a login page`);
+  }
+  const args = fs.readFileSync(argsLog, "utf8");
+  assert.ok(args.includes("pindeck-start.html"));
+  assert.ok(!args.includes(s.token), "no token on Chrome's command line");
+  assert.doesNotMatch(args, /login\?code=|http:\/\//, "no login code or server URL on Chrome's command line");
 });
 
 /* ---- Conflicts: stale edits, Undo and Redo ------------------------------------------------------ */
@@ -484,7 +599,7 @@ function events(t, s) {
   t.after(() => ctrl.abort());
   const list = [];
   (async () => {
-    const res = await fetch(`${s.url}/api/events?t=${s.token}`, { signal: ctrl.signal });
+    const res = await fetch(`${s.url}/api/events`, { headers: { "x-editor-token": s.token }, signal: ctrl.signal });
     const dec = new TextDecoder();
     let buf = "";
     for await (const chunk of res.body) {

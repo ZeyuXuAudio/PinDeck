@@ -1,6 +1,5 @@
 /* PinDeck UI: slide list, canvas with pins, chat with Claude Code. */
 
-const TOKEN = document.querySelector('meta[name="editor-token"]').content;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 /* Changes to the deck carry the revision of the files this tab shows (state.rev); the server refuses them
@@ -12,7 +11,7 @@ const api = async (p, body) => {
   if (change && state.rev) body = { ...body, rev: state.rev };
   const res = await fetch("/api/" + p, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "x-editor-token": TOKEN, "content-type": "application/json" },
+    headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (change && res.ok && res.headers.get("x-deck-rev")) state.rev = res.headers.get("x-deck-rev");
@@ -365,7 +364,7 @@ notesBox.addEventListener("keydown", (e) => {
 // closing the tab while typing: send what is there (sendBeacon cannot set headers, hence the token in the URL)
 addEventListener("pagehide", () => {
   if (notesDirty() && !state.busy)
-    navigator.sendBeacon(`/api/notes?t=${TOKEN}`, new Blob([JSON.stringify({ eid: notes.eid, text: notesBox.value, html: notes.html })]));
+    navigator.sendBeacon("/api/notes", new Blob([JSON.stringify({ eid: notes.eid, text: notesBox.value, html: notes.html })]));
 });
 function setNotesOpen(open) {
   $("notes-panel").classList.toggle("collapsed", !open);
@@ -777,7 +776,7 @@ function applyStatus(s) {
   renderToolbar();
 }
 function connect() {
-  const es = new EventSource(`/api/events?t=${TOKEN}`);
+  const es = new EventSource("/api/events");
   es.addEventListener("hello", (ev) => {
     const d = JSON.parse(ev.data);
     // reconnected after missing file events (tunnel dropped, laptop asleep): show the files as they are now
@@ -824,7 +823,8 @@ function connect() {
     try { api("measure-result", { id, result: await queueMeasure(index) }); }
     catch (err) { api("measure-result", { id, error: String(err) }); }
   });
-  // EventSource reconnects by itself; if the server restarted, our token is stale: reload the page
+  // EventSource reconnects by itself; if the server restarted, the login cookie is stale: reload the page,
+  // which asks for a new login link
   es.onerror = async () => {
     try { if ((await api("ping")).status === 403) location.reload(); } catch {}
   };
@@ -866,7 +866,7 @@ $("import-file").addEventListener("change", async () => {
   if (!file) return;
   toast(`Reading ${file.name}…`);
   const res = await fetch("/api/import", { method: "POST", body: file,
-    headers: { "x-editor-token": TOKEN, "x-filename": encodeURIComponent(file.name), "content-type": "application/octet-stream" } });
+    headers: { "x-filename": encodeURIComponent(file.name), "content-type": "application/octet-stream" } });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) return toast(d.error || `Could not read ${file.name}.`);
   importing = d;
@@ -909,7 +909,7 @@ function showImportThumbs(ev) {
   for (const c of importChecks()) {
     const img = new Image();
     img.alt = "";
-    img.src = `/api/import-thumb?id=${importing.id}&n=${c.value}&t=${TOKEN}`;
+    img.src = `/api/import-thumb?id=${importing.id}&n=${c.value}`;
     c.closest(".thumb").append(img);
   }
 }
@@ -1026,7 +1026,7 @@ const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Ma
 
 async function uploadBlob(blob, name) {
   const res = await fetch("/api/upload", { method: "POST", body: blob,
-    headers: { "x-editor-token": TOKEN, "x-filename": encodeURIComponent(name), "content-type": blob.type || "application/octet-stream" } });
+    headers: { "x-filename": encodeURIComponent(name), "content-type": blob.type || "application/octet-stream" } });
   const d = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(d.error || `Could not upload ${name}.`);
   return d;
