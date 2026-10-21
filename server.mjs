@@ -33,7 +33,7 @@ import { readPptx } from "./lib/pptx.mjs";
 import { exportPdf as pptxToPdf, renderJobs, renderAvailable, pdfInfo } from "./lib/pptx-render.mjs";
 import { buildImport, planSlides } from "./lib/pptx-import.mjs";
 import { isSupportedPlatform, detectCapabilities, publicCapabilities, capabilityPrompt, parsePort, cliCommand, findExecutable } from "./lib/capabilities.mjs";
-import { writeAtomic, sameContent, revision } from "./lib/deck-files.mjs";
+import { writeAtomic, sameContent, revision, scanFiles, scanChanges } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
 const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--model <name>]
@@ -155,6 +155,25 @@ function writeDeckFile(rel, data, manual = true) {
   writeAtomic(abs, data);
 }
 const snapshot = (files) => Object.fromEntries(files.map((f) => [f, readDeck(f)]));
+/* A change (a Claude turn or a hand edit) keeps each file it touched as it was before and after: text as
+   a string, or as a Buffer from a scan of the whole deck (null: the file did not exist). */
+const changeFiles = (t) => [...new Set([...Object.keys(t.before), ...Object.keys(t.after)])];
+const isText = (v) => v == null || typeof v === "string" || !v.includes(0);
+const asText = (v) => (v == null ? "" : String(v));
+const isAs = (rel, v) => sameContent(path.join(DECK_DIR, rel), v ?? null);
+function putDeckFile(rel, v) {   // undo and redo: back to v (null: remove the file)
+  if (v == null) return fs.rmSync(path.join(DECK_DIR, rel), { force: true });
+  fs.mkdirSync(path.dirname(path.join(DECK_DIR, rel)), { recursive: true });
+  writeDeck(rel, v);
+}
+function fileChange(rel, before, after) {
+  if (!isText(before) || !isText(after)) return { file: rel, added: 0, removed: 0, binary: true };
+  const d = unifiedDiff(asText(before), asText(after), rel);
+  return { file: rel, added: d.added, removed: d.removed };
+}
+const fileDiff = (rel, before, after) => (!isText(before) || !isText(after)
+  ? `Binary file ${rel} ${before == null ? "added" : after == null ? "deleted" : "changed"}`
+  : unifiedDiff(asText(before), asText(after), rel).text);
 /* The revision of the editable files: sent with every API answer, checked on the editor's changes */
 const deckRev = () => revision(DECK_DIR, EDITABLE);
 const json = (res, code, obj) => {
@@ -412,6 +431,14 @@ const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md
    the system prompt instead, read afresh at each session start, together with the deck's AGENTS.md (the
    name other coding agents read). Decks copied from the example call the CLI as `node ../cli.mjs`, which
    is right only next to PinDeck: that becomes this server's command. */
+/* What Claude may never change, whatever the edit rules allow: the locked brand files, vendored libraries,
+   git's own files, and other decks in this folder (a named deck shares its folder with them). Deny rules
+   win over allow rules; a locked file changed anyway is restored after the turn (lock 2 in finishTurn). */
+function lockedPaths() {
+  let others = [];
+  try { others = fs.readdirSync(DECK_DIR).filter((f) => /\.html?$/i.test(f) && f !== DECK_FILE); } catch {}
+  return [...LOCKED, "vendor/**", ".git/**", ...others];
+}
 function deckInstructions() {
   return ["CLAUDE.md", "AGENTS.md"].map((name) => {
     let s;
@@ -427,8 +454,9 @@ const session = new ClaudeSession({
     "--append-system-prompt", systemPrompt + deckInstructions(),
     "--setting-sources", "", "--strict-mcp-config",   // no settings files, no MCP servers or connectors
     "--permission-mode", "default",
-    "--allowedTools", "Read", "Glob", "Grep", ...EDITABLE.map((f) => `Edit(./${f})`), `Bash(${CLI_CMD}:*)`,
-    "--disallowedTools", ...LOCKED.flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
+    // any file in the deck folder (Edit rules cover Write too; Write is named as well, to be explicit)
+    "--allowedTools", "Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", `Bash(${CLI_CMD}:*)`,
+    "--disallowedTools", ...lockedPaths().flatMap((f) => [`Edit(./${f})`, `Write(./${f})`]),
     ...(settings.model ? ["--model", settings.model] : []),
     ...(settings.effort ? ["--effort", settings.effort] : []),
   ],
@@ -503,7 +531,9 @@ function handleEvent(ev) {
 }
 
 function startTurn(promptText, userEntry) {
-  state.turn = { id: userEntry.id, before: snapshot([...EDITABLE, ...LOCKED]) };
+  // every deck file as it is now: Claude may change any of them (not brand.css or vendor/), and undo
+  // takes back all it changed
+  state.turn = { id: userEntry.id, before: snapshot([...EDITABLE, ...LOCKED]), scan: scanFiles(DECK_DIR) };
   state.busy = true;
   pushStatus();
   ensureSession();
@@ -527,11 +557,13 @@ function finishTurn({ error, cost, duration, denials = [] }) {
   }
   toolEntries.clear();
   const eid = runEidPass();
-  const after = snapshot(EDITABLE);
-  const files = EDITABLE.map((f) => {
-    const d = unifiedDiff(turn.before[f] ?? "", after[f] ?? "", f);
-    return { file: f, added: d.added, removed: d.removed };
-  }).filter((f) => f.added || f.removed);
+  const { changed, tooLarge } = scanChanges(turn.scan, scanFiles(DECK_DIR));
+  const before = {}, after = {};
+  for (const [rel, c] of Object.entries(changed)) { before[rel] = c.before; after[rel] = c.after; }
+  // the deck file and theme.css first, then the rest by name
+  const order = (rel) => (EDITABLE.includes(rel) ? EDITABLE.indexOf(rel) : EDITABLE.length);
+  const files = Object.keys(changed).sort((a, b) => order(a) - order(b) || a.localeCompare(b))
+    .map((rel) => fileChange(rel, before[rel], after[rel]));
   // after a hand-off: imported pictures that Claude replaced (nothing refers to them any more) are
   // deleted; undo brings them back with the turn
   const deletedFiles = [];
@@ -541,11 +573,13 @@ function finishTurn({ error, cost, duration, denials = [] }) {
     deletedFiles.push({ rel, data: fs.readFileSync(abs) });
     fs.rmSync(abs, { force: true });
   }
-  const t = { id: turn.id, kind: "claude", before: turn.before, after, files, deletedFiles, undone: false };
+  const t = { id: turn.id, kind: "claude", before, after, files, deletedFiles, undone: false };
   if (files.length) { state.turns.push(t); state.redo = []; }
   addEntry({ kind: "turn", turnId: files.length ? t.id : null, files, error, cost, duration,
     denials, restored, newIds: eid.assigned.length });
   if (deletedFiles.length) addEntry({ kind: "notice", text: `Removed ${deletedFiles.map((f) => f.rel).join(", ")}: replaced, and no longer used.` });
+  if (tooLarge.length) addEntry({ kind: "notice", text: `${tooLarge.join(", ")} changed in this turn but ${tooLarge.length > 1 ? "are" : "is"} ` +
+    `too large to keep a copy of (over 2 MB): Undo leaves ${tooLarge.length > 1 ? "them" : "it"} as ${tooLarge.length > 1 ? "they are" : "it is"}.` });
   pushStatus();
 }
 
@@ -779,7 +813,7 @@ function deletePlan(eid) {
    Then nothing is written and the answer is 409 with the files that differ. */
 function undoConflicts(t, direction) {
   const expect = direction === "undo" ? t.after : t.before;
-  const files = EDITABLE.filter((f) => (readDeck(f) ?? null) !== (expect[f] ?? null));
+  const files = changeFiles(t).filter((rel) => !isAs(rel, expect[rel]));
   // undo brings deleted files back (their place must be free, or hold the same bytes) and removes added
   // ones (which must be unchanged); redo the other way round
   const comeBack = direction === "undo" ? t.deletedFiles || [] : t.addedFiles || [];
@@ -805,11 +839,7 @@ function undo(res) {
   if (!t) return json(res, 409, { error: "Nothing to undo." });
   const diverged = undoConflicts(t, "undo");
   if (diverged.length) return conflict(res, "undo", diverged);
-  for (const f of EDITABLE) {
-    if (readDeck(f) === t.before[f]) continue;
-    if (t.before[f] != null) writeDeck(f, t.before[f]);
-    else fs.rmSync(path.join(DECK_DIR, f), { force: true });   // the change created the file
-  }
+  for (const rel of changeFiles(t)) if (!isAs(rel, t.before[rel])) putDeckFile(rel, t.before[rel] ?? null);   // null: the change created it
   for (const { rel, data } of t.deletedFiles || []) writeDeckFile(rel, data, false);   // files deleted with an element come back too
   for (const { rel } of t.addedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });   // imported figures go
   t.undone = true;
@@ -1280,7 +1310,7 @@ const server = http.createServer(async (req, res) => {
     if ((m = p.match(/^\/api\/turn\/(\d+)\/diff$/))) {
       const t = state.turns.find((t) => t.id === +m[1]);
       if (!t) return text(res, 404, "No such change");
-      return text(res, 200, EDITABLE.map((f) => unifiedDiff(t.before[f] ?? "", t.after[f] ?? "", f).text).filter(Boolean).join("\n\n"));
+      return text(res, 200, changeFiles(t).map((rel) => fileDiff(rel, t.before[rel] ?? null, t.after[rel] ?? null)).filter(Boolean).join("\n\n"));
     }
     if ((m = p.match(/^\/api\/turn\/(\d+)\/undo$/)) && req.method === "POST") {
       const t = liveTurns().at(-1);
@@ -1295,11 +1325,7 @@ const server = http.createServer(async (req, res) => {
       const diverged = undoConflicts(t, "redo");
       if (diverged.length) return conflict(res, "redo", diverged);
       state.redo.pop();
-      for (const f of EDITABLE) {
-        if (readDeck(f) === t.after[f]) continue;
-        if (t.after[f] != null) writeDeck(f, t.after[f]);
-        else fs.rmSync(path.join(DECK_DIR, f), { force: true });
-      }
+      for (const rel of changeFiles(t)) if (!isAs(rel, t.after[rel])) putDeckFile(rel, t.after[rel] ?? null);
       for (const { rel } of t.deletedFiles || []) fs.rmSync(path.join(DECK_DIR, rel), { force: true });
       for (const { rel, data } of t.addedFiles || []) writeDeckFile(rel, data, false);
       t.undone = false;

@@ -3,7 +3,8 @@
 
    FAKE_CLAUDE_LOG   a file to append one JSON line per event to (start with argv and cwd, input, signals)
    FAKE_CLAUDE_MODE  "ok" (default): answers each message, appending a comment to theme.css when the
-                     message contains "edit theme";
+                     message contains "edit theme", and doing "fake-op write|append|delete <path>" for each
+                     such phrase (a path relative to the deck; write and append add a line naming the turn);
                      "auth-fail": prints a login error and exits 1;
                      "stubborn": ignores end of input and SIGTERM (only SIGKILL stops it);
                      "garbage": writes malformed and partial lines before each answer */
@@ -38,6 +39,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (mode === "garbage") process.stdout.write("not json\n{\"type\":\"assist");   // a partial line, completed below
   if (mode === "garbage") process.stdout.write("\n");
   if (/edit theme/.test(text)) fs.appendFileSync(path.join(process.cwd(), "theme.css"), "\n/* fake claude edit */\n");
+  for (const [, op, rel] of text.matchAll(/fake-op (write|append|delete) (\S+)/g)) {
+    const abs = path.join(process.cwd(), rel);
+    if (op === "delete") { fs.rmSync(abs, { force: true }); continue; }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    (op === "write" ? fs.writeFileSync : fs.appendFileSync)(abs, `/* fake ${op} of ${rel} */\n`);
+  }
   out({ type: "assistant", session_id: session, message: { content: [{ type: "text", text: "Done (fake)." }] } });
   out({ type: "result", subtype: "success", is_error: false, session_id: session, total_cost_usd: 0, duration_ms: 1 });
 }).on("close", () => {

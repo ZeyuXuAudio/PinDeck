@@ -110,6 +110,11 @@ function serverInfo(fx, pid) {
   }
   return null;
 }
+/* Claude's deny rules: the arguments after --disallowedTools up to the next option */
+const denied = (argv) => {
+  const i = argv.indexOf("--disallowedTools") + 1, j = argv.findIndex((x, k) => k >= i && x.startsWith("--"));
+  return argv.slice(i, j < 0 ? undefined : j);
+};
 const fakeLog = (fx) => fs.existsSync(fx.log) ? fs.readFileSync(fx.log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 const fakePids = (fx) => [...new Set(fakeLog(fx).filter((e) => e.event === "start").map((e) => e.pid))];
 const firstSlideEid = (deck) => /<section[^>]*data-eid="([^"]+)"/.exec(fs.readFileSync(path.join(deck, "index.html"), "utf8"))[1];
@@ -158,9 +163,10 @@ for (const platform of ["linux", "darwin"]) {
     const rel = path.relative(fx.deck, path.join(ROOT, "cli.mjs")).split(path.sep).join("/");
     assert.ok(a.includes(`Bash(${cliCommand(rel)}:*)`), "the CLI permission is the one quoted command");
     const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
-    assert.deepEqual(allowed, ["Read", "Glob", "Grep", "Edit(./index.html)", "Edit(./theme.css)", `Bash(${cliCommand(rel)}:*)`],
+    assert.deepEqual(allowed, ["Read", "Glob", "Grep", "Edit(./**)", "Write(./**)", `Bash(${cliCommand(rel)}:*)`],
       "no broader permissions");
-    assert.deepEqual(a.slice(a.indexOf("--disallowedTools") + 1, a.indexOf("--disallowedTools") + 3), ["Edit(./brand.css)", "Write(./brand.css)"]);
+    assert.deepEqual(denied(a), ["Edit(./brand.css)", "Write(./brand.css)", "Edit(./vendor/**)", "Write(./vendor/**)",
+      "Edit(./.git/**)", "Write(./.git/**)"], "the deck folder except brand.css, vendor/ and .git/");
 
     // a hand edit (speaker notes) is saved into the deck copy
     const eid = firstSlideEid(fx.deck);
@@ -213,6 +219,46 @@ test("Claude turn with fake Claude: edit, undo and redo", async (t) => {
   assert.equal((await s.api("redo", {})).status, 200);
   assert.ok(fs.readFileSync(theme, "utf8").includes("fake claude edit"));
   assert.equal(fakePids(fx).length, 1, "one claude process for the whole chat");
+});
+
+test("A turn that changes, creates and deletes other deck files: one undo takes all of it back", async (t) => {
+  const fx = fixture(t);
+  const s = await startServer(t, fx);
+  const f = (rel) => path.join(fx.deck, rel);
+  const keep = ["deck.js", "README.md", "brand.css", "figures/sample_a.wav", "index.html", "theme.css"];
+  const orig = Object.fromEntries(keep.map((rel) => [rel, fs.readFileSync(f(rel))]));
+  const ops = "fake-op append deck.js fake-op write notes/new.md fake-op delete README.md " +
+    "fake-op write figures/sample_a.wav fake-op append brand.css fake-op write vendor/extra.js";
+  assert.equal((await s.api("message", { text: ops })).status, 200);
+  const turn = await waitFor(() => chatOf(fx).find((e) => e.kind === "turn"), "the turn entry");
+  assert.deepEqual(turn.files.map((x) => x.file), ["deck.js", "figures/sample_a.wav", "notes/new.md", "README.md"]);
+  assert.equal(turn.files.find((x) => x.file === "figures/sample_a.wav").binary, true);
+  assert.equal(turn.files.find((x) => x.file === "deck.js").added, 1);
+  assert.deepEqual(turn.restored, ["brand.css"], "the locked file is restored, not recorded");
+  assert.ok(fs.readFileSync(f("brand.css")).equals(orig["brand.css"]));
+
+  const diff = (await s.api(`turn/${turn.turnId}/diff`)).data;
+  assert.match(diff, /\+\/\* fake append of deck\.js \*\//);
+  assert.match(diff, /Binary file figures\/sample_a\.wav changed/);
+  assert.match(diff, /notes\/new\.md/);
+  assert.match(diff, /README\.md/);
+
+  assert.equal((await s.api("undo", {})).status, 200);
+  for (const rel of keep) assert.ok(fs.readFileSync(f(rel)).equals(orig[rel]), `${rel} restored`);
+  assert.equal(fs.existsSync(f("notes/new.md")), false, "the new file is gone");
+  assert.equal(fs.existsSync(f("vendor/extra.js")), true, "vendor/ is not part of undo");
+
+  assert.equal((await s.api("redo", {})).status, 200);
+  assert.match(fs.readFileSync(f("deck.js"), "utf8"), /fake append of deck\.js/);
+  assert.equal(fs.existsSync(f("README.md")), false);
+  assert.ok(fs.existsSync(f("notes/new.md")));
+
+  // a file changed outside PinDeck since: Undo refuses and names it, and writes nothing
+  fs.writeFileSync(f("notes/new.md"), "changed by hand\n");
+  const u = await s.api("undo", {});
+  assert.equal(u.status, 409);
+  assert.deepEqual(u.data.files, ["notes/new.md"]);
+  assert.match(fs.readFileSync(f("deck.js"), "utf8"), /fake append of deck\.js/, "nothing undone");
 });
 
 test("Malformed and partial stream lines do not break a turn", async (t) => {
@@ -360,7 +406,9 @@ test("A named deck file: served, edited, given ids and permissions, with state o
   const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
   const a = start.argv;
   const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
-  assert.ok(allowed.includes(`Edit(./${name})`) && allowed.includes("Edit(./theme.css)") && !allowed.includes("Edit(./index.html)"));
+  assert.ok(allowed.includes("Edit(./**)"));
+  assert.ok(denied(a).includes("Edit(./index.html)") && denied(a).includes("Write(./index.html)"), "the other deck in the folder");
+  assert.ok(!denied(a).includes(`Edit(./${name})`));
   const prompt = a[a.indexOf("--append-system-prompt") + 1];
   assert.match(prompt, /- my talk\.html: the slides\. theme\.css: the styles\./);
   assert.match(prompt, /## This deck's file\nThe slides are in my talk\.html\. Where the deck's notes below say index\.html/);

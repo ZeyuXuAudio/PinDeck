@@ -594,7 +594,8 @@ function entryHtml(e) {
       if (e.error) parts.push(`<span class="warn">${esc(e.error)}</span>`);
       if (e.files?.length) {
         parts.push(`<span class="files ${t?.undone ? "undone" : ""}">Changed ${e.files.map((f) =>
-          `${esc(f.file)} <span class="add">+${f.added}</span> <span class="del">−${f.removed}</span>`).join(", ")}</span>`);
+          `${esc(f.file)} ` + (f.binary ? `<span class="add">(binary)</span>`
+            : `<span class="add">+${f.added}</span> <span class="del">−${f.removed}</span>`)).join(", ")}</span>`);
         parts.push(`<button class="small" data-diff="${e.turnId}">Diff</button>`);
         if (t && !t.undone) parts.push(`<button class="small" data-undo="${e.turnId}">Undo</button>`);
         if (t?.undone) parts.push("<span>undone</span>");

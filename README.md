@@ -21,8 +21,8 @@ checked the layout; the next request, still being typed, refers to the new pins 
 * **Edit by hand, too.** Move, resize and nudge elements with snapping, edit text in place (math stays
   TeX), write speaker notes, add, hide, move and delete slides. One undo history covers your edits and
   Claude's.
-* **Stay on brand.** `brand.css` is locked: Claude edits the deck file and `theme.css` only, and checks
-  its own work with PinDeck's layout command.
+* **Stay on brand.** `brand.css` is locked: Claude edits the deck, its styles and other files of the deck
+  folder, never `brand.css` or `vendor/`, and checks its own work with PinDeck's layout command.
 * **Bring material in.** Attach figures, audio and PDFs to a message, or import slides from PowerPoint
   into the deck's own layouts.
 * **Get it out.** Present from the browser, or export a handout or presentation PDF.
@@ -271,12 +271,15 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
   running, so there is no start-up delay per message. It runs in the deck folder under your Claude
   login, with `--append-system-prompt` from `lib/system-prompt.md` and the deck's `CLAUDE.md`.
-* **Permissions.** Claude may read files, edit the deck file (`index.html` or the named one) and `theme.css`, and run the editor's
-  CLI. Nothing else, and in particular no edits to `brand.css`. Claude Code loads no settings files
+* **Permissions.** Claude may read files, edit and create files in the deck folder, and run the editor's
+  CLI. Nothing else: no other commands, and no edits to `brand.css`, `vendor/`, `.git/` or, for a named
+  deck file, the other decks in its folder. Claude Code loads no settings files
   and no MCP servers, so no allow rule in your own, the deck's or a parent folder's settings widens this. If `brand.css` changes during a
   turn anyway, the server restores it and says so in the chat.
-* **Undo.** The server keeps a copy of the editable files from before each change (a Claude turn
-  or a hand edit). Undo and redo walk that history and tell Claude on the next message. They first check
+* **Undo.** The server keeps a copy of every file a change touched, from before and after it (a Claude
+  turn, which may change, create or delete several files of the deck, or a hand edit). Files over 2 MB
+  are not copied: the chat says when a turn changed one, and Undo leaves it as it is. Hidden files,
+  `vendor/` and `export/` are not part of undo. Undo and redo walk that history and tell Claude on the next message. They first check
   that the files are still as that change left them; if something else changed them since, they do
   nothing and say which file differs, rather than overwrite that work.
 * **Saving.** Every file PinDeck writes into the deck is written to a temporary file next to it and then
