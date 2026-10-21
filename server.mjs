@@ -106,7 +106,8 @@ const MIME = { html: "text/html; charset=utf-8", css: "text/css; charset=utf-8",
   mjs: "text/javascript; charset=utf-8", json: "application/json", svg: "image/svg+xml", png: "image/png",
   jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", ico: "image/x-icon",
   woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", wav: "audio/wav", mp3: "audio/mpeg",
-  mp4: "video/mp4", webm: "video/webm", pdf: "application/pdf", md: "text/plain; charset=utf-8" };
+  ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", pdf: "application/pdf", md: "text/plain; charset=utf-8" };
 const hash = (s) => crypto.createHash("sha1").update(s).digest("hex");
 const readDeck = (f) => { try { return fs.readFileSync(path.join(DECK_DIR, f), "utf8"); } catch { return null; } };
 const ourWrites = new Map(); // file -> { hash, manual } of what we wrote, to tell our writes from others
@@ -853,12 +854,38 @@ async function refineImport(imp, pdf, plans, eids, first) {
 const BRIDGE_TAG = `<script src="/editor/bridge.js"></script>\n</body>`;
 let HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);   // set again from the bound port
 
-function serveFile(res, file, transform) {
-  fs.readFile(file, (err, data) => {
+/* Files with a length and byte ranges: Safari plays audio and video only from servers that answer a
+   Range request with 206, and seeking needs it everywhere. Transformed (HTML) files are sent whole. */
+function serveFile(res, file, transform, req) {
+  const type = MIME[path.extname(file).slice(1).toLowerCase()] || "application/octet-stream";
+  if (transform) return fs.readFile(file, (err, data) => {
     if (err) return text(res, 404, "Not found");
-    const ext = path.extname(file).slice(1).toLowerCase();
-    res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": "no-store" });
-    res.end(transform ? transform(String(data)) : data);
+    const out = Buffer.from(transform(String(data)));
+    res.writeHead(200, { "content-type": type, "content-length": out.length, "cache-control": "no-store" });
+    res.end(out);
+  });
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return text(res, 404, "Not found");
+    const headers = { "content-type": type, "accept-ranges": "bytes", "cache-control": "no-store" };
+    let start = 0, end = st.size - 1, code = 200;
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req?.headers.range || "").trim());   // one range only
+    if (range && (range[1] || range[2])) {
+      if (range[1]) { start = +range[1]; if (range[2]) end = Math.min(+range[2], end); }
+      else start = Math.max(0, st.size - +range[2]);   // suffix: the last n bytes
+      if (start > end || start >= st.size) {
+        res.writeHead(416, { ...headers, "content-range": `bytes */${st.size}` });
+        return res.end();
+      }
+      code = 206;
+      headers["content-range"] = `bytes ${start}-${end}/${st.size}`;
+    }
+    headers["content-length"] = st.size ? end - start + 1 : 0;
+    res.writeHead(code, headers);
+    if (!st.size) return res.end();
+    const stream = fs.createReadStream(file, { start, end });
+    stream.on("error", () => res.destroy());
+    res.on("close", () => stream.destroy());
+    stream.pipe(res);
   });
 }
 
@@ -876,7 +903,7 @@ const server = http.createServer(async (req, res) => {
       return serveFile(res, path.join(EDITOR_DIR, "public/index.html"), (s) => s.replace("%%TOKEN%%", TOKEN));
     if (req.method === "GET" && p.startsWith("/editor/")) {
       const f = safeJoin(path.join(EDITOR_DIR, "public"), p.slice(8));
-      return f ? serveFile(res, f) : text(res, 403, "Forbidden");
+      return f ? serveFile(res, f, null, req) : text(res, 403, "Forbidden");
     }
     let snap;
     if (req.method === "GET" && (snap = p.match(/^\/deck\/__pindeck-print-([\w-]+)\.html$/))) {
@@ -889,7 +916,7 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(DECK_DIR, p.slice(6) || DECK_FILE);
       if (!f) return text(res, 403, "Forbidden");
       const mode = url.searchParams.get("editor");
-      if (!mode || !f.endsWith(".html")) return serveFile(res, f);
+      if (!mode || !f.endsWith(".html")) return serveFile(res, f, null, req);
       return serveFile(res, f, (s) => {
         // headless runs must not stream media, or Chrome never finishes the page
         if (mode === "shot" || mode === "dump" || mode === "pdf") s = s.replace(/\bpreload="(auto|metadata)"/g, 'preload="none"');

@@ -320,6 +320,54 @@ test("Read-only deck folder: refused before anything is written", { skip: proces
   assert.match(r.output, /not writable/);
 });
 
+/* ---- Deck files ------------------------------------------------------------------------------- */
+test("Deck media: length, byte ranges (Safari needs 206), 416 for bad ranges, audio types", async (t) => {
+  const fx = fixture(t);
+  const s = await startServer(t, fx);
+  const wav = fs.readFileSync(path.join(fx.deck, "figures/sample_a.wav"));
+  const get = (p, headers = {}) => fetch(`${s.url}/deck/${p}`, { headers });
+
+  let r = await get("figures/sample_a.wav");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "audio/wav");
+  assert.equal(r.headers.get("accept-ranges"), "bytes");
+  assert.equal(+r.headers.get("content-length"), wav.length);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(wav));
+
+  r = await get("figures/sample_a.wav", { range: "bytes=0-1" });   // Safari's first probe
+  assert.equal(r.status, 206);
+  assert.equal(r.headers.get("content-range"), `bytes 0-1/${wav.length}`);
+  assert.equal(+r.headers.get("content-length"), 2);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(wav.subarray(0, 2)));
+
+  r = await get("figures/sample_a.wav", { range: "bytes=100-" });
+  assert.equal(r.status, 206);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(wav.subarray(100)));
+
+  r = await get("figures/sample_a.wav", { range: "bytes=-10" });
+  assert.equal(r.headers.get("content-range"), `bytes ${wav.length - 10}-${wav.length - 1}/${wav.length}`);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(wav.subarray(-10)));
+
+  r = await get("figures/sample_a.wav", { range: `bytes=${wav.length}-` });
+  assert.equal(r.status, 416);
+  assert.equal(r.headers.get("content-range"), `bytes */${wav.length}`);
+  await r.arrayBuffer();
+
+  fs.writeFileSync(path.join(fx.deck, "figures/clip.m4a"), "x");
+  r = await get("figures/clip.m4a");
+  assert.equal(r.headers.get("content-type"), "audio/mp4");
+  await r.arrayBuffer();
+  assert.equal((await get("figures/missing.wav")).status, 404);
+  assert.equal((await get("figures")).status, 404);
+
+  // HTML with the editor bridge: still whole, with the right length
+  r = await get("index.html?editor=1", { range: "bytes=0-1" });
+  assert.equal(r.status, 200);
+  const page = Buffer.from(await r.arrayBuffer());
+  assert.equal(+r.headers.get("content-length"), page.length);
+  assert.match(page.toString(), /<script src="\/editor\/bridge\.js"><\/script>\n<\/body>/);
+});
+
 /* ---- Security --------------------------------------------------------------------------------- */
 test("Loopback only; bad host, token and origin are refused", async (t) => {
   const fx = fixture(t);
