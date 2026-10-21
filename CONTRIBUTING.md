@@ -30,9 +30,11 @@ node cli.mjs git-setup ocean-example   # keep PinDeck's data-eid ids out of your
 node server.mjs ocean-example          # then open http://127.0.0.1:5180/
 ```
 
-There is nothing to install: PinDeck has no npm dependencies. You need Node 20 or later and the
-`claude` CLI; Chrome is used for screenshots and PDF export, PowerPoint or Keynote (macOS) for the
-pictures in the PowerPoint import.
+There is nothing to install: PinDeck has no npm dependencies. You need macOS or Linux, Node 20 or later
+and the `claude` CLI; Chrome is used for screenshots and PDF export, PowerPoint or Keynote (macOS) for
+the pictures in the PowerPoint import. What a system can do is decided in one place,
+`lib/capabilities.mjs`: a feature that needs something missing is switched off there, with a reason, rather
+than failing when used.
 
 Useful while developing:
 
@@ -79,6 +81,11 @@ stages the version on npm. It goes live once a maintainer approves it with 2FA, 
 ## Testing
 
 Run `npm test` (Node's built-in test runner, `test/*.test.mjs`); it needs neither Claude nor a browser.
+`test/server.test.mjs` starts real PinDeck servers on copies of `ocean-example` with their own
+`PINDECK_HOME` and a fake `claude` (`test/fixtures/fake-claude`, no network and no AI). Tests for the other
+platform override `process.platform` and say so in their name. They check the code paths, not that
+platform, so a Linux change needs a run on real Linux (the CI workflow does that). Never point tests or a
+manual run at your own decks; use copies.
 Then check your change by hand before you open a pull request:
 
 1. `node --check` on the files you changed.

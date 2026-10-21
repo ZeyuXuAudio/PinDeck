@@ -1,6 +1,8 @@
 # PinDeck
 
-> **macOS only.** Windows and Linux are not supported.
+> **macOS, and Linux as a beta.** On Linux, PinDeck runs as a headless server that you use from your
+> Mac's browser through an SSH tunnel (see [Running on a Linux server](#running-on-a-linux-server-beta)).
+> Windows is not supported.
 
 **Pin it. Say it. Done.** PinDeck is a local editor for HTML slide decks (reveal.js): the slides on
 the left, the slide in the middle, and a chat with Claude Code on the right. You click elements to
@@ -28,9 +30,10 @@ checked the layout; the next request, still being typed, refers to the new pins 
 
 ## Quick start
 
-Requires macOS. The npm package declares `"os": ["darwin"]`, so normal npm installation
-rejects other operating systems. Overriding that check does not make those platforms supported. Running the server from a cloned
-repository on another OS shows a local support notice instead of opening the deck or starting Claude.
+Runs on macOS, and on Linux as a beta. The npm package declares `"os": ["darwin", "linux"]`, so normal
+npm installation rejects other operating systems. Overriding that check does not make those platforms
+supported. Running the server from a cloned repository on another OS shows a local support notice
+instead of opening the deck or starting Claude.
 
 ```bash
 npx pindeck path/to/deck        # from npm
@@ -43,7 +46,8 @@ Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `clau
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
 screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import.
 
-Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
+PinDeck adds element ids to the deck's `index.html` when it opens it (see below), so try it on a copy
+of a deck first. Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
 `~/.pindeck/config.json`), `--help`. The deck folder defaults to the current folder and must contain
 `index.html`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck/` (change with
 `PINDECK_HOME`), not in the deck. `ocean-example/` is a complete example deck to start from.
@@ -106,6 +110,44 @@ plain players.
 `model` is `opus` or `sonnet`; `effort` is `low`, `medium`, `high`, `xhigh` or `max`. A choice in the
 chat header's menu is written to this file, so it always shows what PinDeck uses. Edit it while
 PinDeck is stopped, or simply use the menu.
+
+## Running on a Linux server (beta)
+
+PinDeck can run on a Linux machine where the deck lives, with the editor in your Mac's browser. The
+deck, PinDeck, Claude Code and the deck's git clone all stay on the server; the browser only shows the
+editor. The server listens on 127.0.0.1 there, as on a Mac, and an SSH tunnel brings that port to your Mac.
+
+On the server you need Node 20 or later (22 or 24 recommended), git if the deck is in a repository, and
+the `claude` CLI installed and logged in under your account there, if you want the chat. Without it,
+editing by hand still works. Then, in one SSH session on the server:
+
+```bash
+node server.mjs path/to/deck --port 5180
+```
+
+and on your Mac, in another terminal (`myserver` is your usual SSH host):
+
+```bash
+ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:5180:127.0.0.1:5180 myserver
+```
+
+Open <http://127.0.0.1:5180/> on the Mac. Use the same port on both ends, since PinDeck checks it; if 5180 is taken,
+use for example 5181 on both. If the tunnel drops, a message you have already sent keeps running on the
+server. Restart the tunnel and the editor reconnects and shows the files as they are then; it never sends a
+message twice. If PinDeck restarts, the page reloads itself with the new token.
+
+What works on Linux in this beta: editing by hand, speaker notes, slides, pins, the chat with Claude,
+Undo/Redo, live reload when files change on the server, the layout check while the editor is open,
+attaching figures, audio and PDFs, and `git-setup`. What does not, with the reason shown in the editor
+(hover over "Server: Linux (beta)"): screenshots, PDF export and layout checks without an open editor
+(Chrome features are not yet validated on Linux; `PINDECK_LINUX_CHROME=1` turns them on for testing),
+pictures of PDF pages (`pdf-figure`, needs macOS PDFKit), and the PowerPoint import. Claude is told
+which commands are not available.
+
+Run one PinDeck per deck. While PinDeck or Claude is working on a deck, do not edit it with other tools
+or switch git branches at the same time. Stop first, or wait until Claude has finished. PinDeck notices
+changes made by other programs and reloads, and it refuses Undo, Redo or an edit that would overwrite
+them. Its checks cannot rule out every race with a program that writes at the same moment.
 
 ## Keeping the ids out of git
 
@@ -223,7 +265,13 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
   and no MCP servers, so no allow rule in your own, the deck's or a parent folder's settings widens this. If `brand.css` changes during a
   turn anyway, the server restores it and says so in the chat.
 * **Undo.** The server keeps a copy of the editable files from before each change (a Claude turn
-  or a hand edit). Undo and redo walk that history and tell Claude on the next message.
+  or a hand edit). Undo and redo walk that history and tell Claude on the next message. They first check
+  that the files are still as that change left them; if something else changed them since, they do
+  nothing and say which file differs, rather than overwrite that work.
+* **Saving.** Every file PinDeck writes into the deck is written to a temporary file next to it and then
+  renamed into place, so other programs never see half a file. Each change from the editor carries the
+  revision of the files it was made on; if the files have changed since, the change is refused, the
+  slide reloads, and edited text can be copied from the message to type in again.
 
 ## Files
 
@@ -240,6 +288,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
 | `lib/claude.mjs` | The long-running Claude Code process. |
+| `lib/capabilities.mjs` | What this server can do on this system (macOS, Linux), for the editor, the API, the CLI and Claude. |
+| `lib/deck-files.mjs` | Atomic writes and the revision of the deck's files. |
 | `lib/system-prompt.md` | What Claude is told about the editor. |
 | `CONTRIBUTING.md` | How to report bugs and contribute. |
 | `docs/` | Images for this README. |
@@ -252,6 +302,9 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does not merge it with the one above; ask Claude for those.
 * Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to turn hand edits into proper CSS when a layout should really change.
 * The undo history lives on the server and starts fresh when PinDeck restarts.
+* One writer at a time: PinDeck is not made for editing the same deck from two editors or tools at once.
+* Linux (beta): no screenshots, PDF export, PDF page pictures or PowerPoint import yet; tested hosts are
+  listed in the release notes.
 
 ## Versions
 
