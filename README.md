@@ -42,7 +42,8 @@ git clone https://github.com/ehabets/PinDeck.git && cd PinDeck
 node server.mjs ocean-example   # or from source, with the example deck in this repository
 ```
 
-Then open <http://127.0.0.1:5180/>. Requirements: Node 20 or later and the `claude` CLI, signed in
+Then open the login link PinDeck prints (`PinDeck: http://127.0.0.1:5180/login?code=...`). It works
+once and logs this browser in; for a new one, run `pindeck login` (or `node server.mjs login`). Requirements: Node 20 or later and the `claude` CLI, signed in
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
 screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import.
 
@@ -132,19 +133,25 @@ and on your Mac, in another terminal (`myserver` is your usual SSH host):
 ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:5180:127.0.0.1:5180 myserver
 ```
 
-Open <http://127.0.0.1:5180/> on the Mac. The local port may differ from the server's: with
-`-L 127.0.0.1:8080:127.0.0.1:5180`, open <http://127.0.0.1:8080/>. PinDeck accepts any port, as long as the
-address is `127.0.0.1` or `localhost`. If the tunnel drops, a message you have already sent keeps running on the
+Open the login link PinDeck printed on the server in the Mac's browser. The local port may differ from
+the server's: with `-L 127.0.0.1:8080:127.0.0.1:5180`, change 5180 in the link to 8080. PinDeck accepts any
+port, as long as the address is `127.0.0.1` or `localhost`. If the tunnel drops, a message you have already sent keeps running on the
 server. Restart the tunnel and the editor reconnects and shows the files as they are then; it never sends a
-message twice. If PinDeck restarts, the page reloads itself with the new token.
+message twice. If PinDeck restarts, the editor asks you to log in again: run `node server.mjs login
+path/to/deck` on the server for a new link.
+
+Other users of a shared server cannot open the editor or read the deck through PinDeck: the token that
+protects it is only in your browser's cookie and in PinDeck's own files in `~/.pindeck` (readable only by
+you), never in a page or on a command line.
 
 What works on Linux in this beta: editing by hand, speaker notes, slides, pins, the chat with Claude,
-Undo/Redo, live reload when files change on the server, the layout check while the editor is open,
-attaching figures, audio and PDFs, and `git-setup`. What does not, with the reason shown in the editor
-(hover over "Server: Linux (beta)"): screenshots, PDF export and layout checks without an open editor
-(Chrome features are not yet validated on Linux; `PINDECK_LINUX_CHROME=1` turns them on for testing),
-pictures of PDF pages (`pdf-figure`, needs macOS PDFKit), and the PowerPoint import. Claude is told
-which commands are not available.
+Undo/Redo, live reload when files change on the server, layout checks, attaching figures, audio and
+PDFs, `git-setup`, and, with Chrome or Chromium installed on the server, screenshots and PDF export
+(`PINDECK_LINUX_CHROME=0` turns these off). What does not, with the reason shown in the editor (hover
+over "Server: Linux (beta)"): pictures of PDF pages (`pdf-figure`, needs macOS PDFKit) and the
+PowerPoint import. Claude is told which commands are not available. Chromium from snap may not be
+allowed to use hidden folders in your home folder such as `~/.pindeck`; if screenshots fail with it, set
+`PINDECK_HOME` to a folder that is not hidden, or install Chrome or Chromium from a package.
 
 Run one PinDeck per deck. While PinDeck or Claude is working on a deck, do not edit it with other tools
 or switch git branches at the same time. Stop first, or wait until Claude has finished. PinDeck notices
@@ -279,7 +286,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 | File | Purpose |
 |---|---|
-| `server.mjs` | Local server (127.0.0.1 only, random token per run): UI, deck files, events, Claude session, undo, CLI endpoints. |
+| `server.mjs` | Local server (127.0.0.1 only, random token per run, one-time login links): UI, deck files, events, Claude session, undo, CLI endpoints, `login`. |
 | `cli.mjs` | `layout`, `shot`, `slides`, `pdf handout` / `pdf presentation` and `pdf-figure` commands for Claude (and for you), and `git-setup`. |
 | `public/` | The editor page, and `bridge.js`, which is injected into the deck in edit mode (never saved to it). |
 | `lib/pptx.mjs`, `lib/zip.mjs`, `lib/xml.mjs` | Reading `.pptx` files (no dependencies): slides, text, shapes and their positions, notes. |
@@ -305,12 +312,23 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to turn hand edits into proper CSS when a layout should really change.
 * The undo history lives on the server and starts fresh when PinDeck restarts.
 * One writer at a time: PinDeck is not made for editing the same deck from two editors or tools at once.
-* Linux (beta): no screenshots, PDF export, PDF page pictures or PowerPoint import yet; tested hosts are
-  listed in the release notes.
-* Shared servers: other users logged in to the same machine can read the editor's token and the deck
-  (fixed in 2.9.0-beta.3). Until then, use PinDeck only on servers where you trust all users.
+* Linux (beta): no PDF page pictures or PowerPoint import yet; tested hosts are listed in the release notes.
 
 ## Versions
+
+* **2.9.0-beta.3** (2.9 beta): a security fix for shared servers, and Chrome features on Linux.
+  - Security: the editor page no longer contains the token, and the deck needs it too, so other users of
+    the same machine can no longer read either with `curl`. PinDeck prints a one-time login link at start
+    (`pindeck login` prints a new one), which keeps the token in an HttpOnly cookie named after the
+    server's port. Headless Chrome logs in the same way, so the token is not on its command line either.
+    After a restart, log in again with a new link.
+  - Linux: screenshots, layout checks without an open editor and PDF export work when Chrome or
+    Chromium is found (tested on Ubuntu 24.04 with Google Chrome); `PINDECK_LINUX_CHROME=0` turns them
+    off. Snap's Chromium is found too.
+  - Linux: changes to the deck made by other programs are seen every time. Before, a file replaced by
+    a rename (how most editors save) was no longer watched, so later changes went unseen and the next
+    edit in PinDeck was refused. The tests now run on real Linux and macOS in CI.
+  - The deck's `AGENTS.md` reaches Claude along with its `CLAUDE.md`. Parent folders: later, as an option.
 
 * **2.9.0-beta.2** (2.9 beta): fixes from the first remote tests. Audio and video play in Safari: deck files
   are sent with their length and byte ranges, and ogg, opus, m4a, aac, flac and mov get their media types.
