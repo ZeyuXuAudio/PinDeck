@@ -15,7 +15,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { cliCommand } from "../lib/capabilities.mjs";
+import { cliCommand, findExecutable } from "../lib/capabilities.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SERVER = path.join(ROOT, "server.mjs");
@@ -183,18 +183,21 @@ for (const platform of ["linux", "darwin"]) {
     assert.ok(!s.output().includes(s.token), "the token is not logged");
 
     if (platform === "linux") {
-      // macOS-only features are off with a reason, refused before doing anything, and never call macOS tools
-      for (const k of ["pdfPages", "pptxImport", "pptxPictures", "audioConvert", "pdfExport", "headlessLayout"])
-        assert.equal(st.capabilities[k].available, false, k);
+      // features without their tool are off with a reason, refused before doing anything, and nothing
+      // calls macOS tools; the PowerPoint import itself is available (a broken file is refused as such)
+      const poppler = ["pdftoppm", "pdfinfo"].every((n) => findExecutable(n, { env: { PATH: `${fx.shims}${path.delimiter}${process.env.PATH}` } }).path);
+      for (const k of ["pdfExport", "headlessLayout"]) assert.equal(st.capabilities[k].available, false, k);
+      assert.equal(st.capabilities.pptxImport.available, true);
+      assert.equal(st.capabilities.pdfPages.available, poppler);
       const imp = await fetch(`${s.url}/api/import`, { method: "POST", body: "PK",
         headers: { "x-editor-token": s.token, "x-filename": "a.pptx" } });
-      assert.equal(imp.status, 501);
+      assert.notEqual(imp.status, 501);
       const pdf = await fetch(`${s.url}/api/upload`, { method: "POST", body: "%PDF-1.4\n%%EOF\n",
         headers: { "x-editor-token": s.token, "x-filename": "paper.pdf" } });
       const up = await pdf.json();
       assert.equal(pdf.status, 200);
       assert.equal(up.pages, undefined);
-      assert.equal((await s.api(`pdf-figure?file=${encodeURIComponent(up.path)}&page=1`)).status, 501);
+      if (!poppler) assert.equal((await s.api(`pdf-figure?file=${encodeURIComponent(up.path)}&page=1`)).status, 501);
       assert.equal((await s.api("shot?slide=1")).status, 501);
       assert.equal((await s.api("pdf?slide=handout")).status, 501);
       const layout = await s.api("layout?slide=1");   // no editor tab open, no headless Chrome

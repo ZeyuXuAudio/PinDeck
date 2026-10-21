@@ -45,7 +45,8 @@ node server.mjs ocean-example   # or from source, with the example deck in this 
 Then open the login link PinDeck prints (`PinDeck: http://127.0.0.1:5180/login?code=...`). It works
 once and logs this browser in; for a new one, run `pindeck login` (or `node server.mjs login`). Requirements: Node 20 or later and the `claude` CLI, signed in
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
-screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import.
+screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import; on
+Linux, Poppler, LibreOffice and ffmpeg (see [Running on a Linux server](#running-on-a-linux-server-beta)).
 
 The deck is a file (`pindeck path/to/talk.html`) or a folder, which opens its `index.html`; without
 one, the current folder. Several decks can share a folder, each with its own chat and undo history;
@@ -173,10 +174,19 @@ you), never in a page or on a command line.
 
 What works on Linux in this beta: editing by hand, speaker notes, slides, pins, the chat with Claude,
 Undo/Redo, live reload when files change on the server, layout checks, attaching figures, audio and
-PDFs, `git-setup`, and, with Chrome or Chromium installed on the server, screenshots and PDF export
-(`PINDECK_LINUX_CHROME=0` turns these off). What does not, with the reason shown in the editor (hover
-over "Server: Linux (beta)"): pictures of PDF pages (`pdf-figure`, needs macOS PDFKit) and the
-PowerPoint import. Claude is told which commands are not available. Chromium from snap may not be
+PDFs, `git-setup` and the PowerPoint import. Some features use programs on the server, and are on when
+they are installed (on Debian or Ubuntu: `sudo apt install poppler-utils libreoffice-impress ffmpeg`):
+
+| Feature | Needs |
+|---|---|
+| Screenshots, layout checks without an open editor, PDF export | Chrome or Chromium (`PINDECK_LINUX_CHROME=0` turns these off) |
+| Pictures of PDF pages (`pdf-figure`) | Poppler (`pdftoppm`, `pdfinfo`) |
+| Pictures of PowerPoint slides in the import (thumbnails, diagrams) | LibreOffice (`soffice`) and Poppler |
+| Waveforms of audio other than WAV in the import | ffmpeg |
+
+Without them the editor says what is missing (hover over "Server: Linux (beta)"), and Claude is told
+which commands are not available. LibreOffice may draw some slides a little differently from PowerPoint;
+the pictures are references and figures, the slides themselves are rebuilt from the file. Chromium from snap may not be
 allowed to use hidden folders in your home folder such as `~/.pindeck`; if screenshots fail with it, set
 `PINDECK_HOME` to a folder that is not hidden, or install Chrome or Chromium from a package.
 
@@ -218,7 +228,7 @@ show and commit as usual. Clones without the filter configured simply see the fi
 | Hide a slide | The eye on a slide in the list, or `H`. A hidden slide stays in the deck and in PinDeck (greyed out, with a banner) but is skipped when presenting and in PDFs; **Export ▾** can include hidden slides. Show it the same way. |
 | Model and effort | Click **Claude ▾** in the chat header: Opus or Sonnet, and the effort (how long Claude thinks: low to max). The conversation continues after a change. The choice is saved in `~/.pindeck/config.json` (default: Sonnet, medium). |
 | Attach figures and audio | **+** in the chat, then **File…**, drag and drop onto the chat or a slide, or paste an image. Files are saved in `<deck>/figures/` straight away; audio also gets a waveform SVG. Then ask Claude, e.g. "put this figure on a new slide after 4". Removing an attachment before sending deletes the file again. |
-| Attach a PDF | The same way: a figure or table to take over, or a paper or report with more details. PDFs stay outside the deck (in `~/.pindeck`); Claude reads them, rebuilds tables as HTML, and renders a figure (a page or a cropped part of one) into `<deck>/figures/` as PNG with `cli.mjs pdf-figure` (macOS). E.g. "put Fig. 3 of this paper on slide 7" or "add the results of Table 2 to slide 9". |
+| Attach a PDF | The same way: a figure or table to take over, or a paper or report with more details. PDFs stay outside the deck (in `~/.pindeck`); Claude reads them, rebuilds tables as HTML, and renders a figure (a page or a cropped part of one) into `<deck>/figures/` as PNG with `cli.mjs pdf-figure` (macOS, or Linux with Poppler). E.g. "put Fig. 3 of this paper on slide 7" or "add the results of Table 2 to slide 9". |
 | Export PDF | **Export ▾** in the toolbar. **Handout PDF**: one page per slide, build steps shown complete. **Presentation PDF**: one page per click, so a slide with two build steps gives three pages. Files go to `<deck>/export/`. Needs Chrome or Chromium. |
 | Navigate | Slide list, `←` `→`, or the toolbar. **Present** opens the deck in a new tab. |
 
@@ -323,7 +333,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 | `lib/pptx-import.mjs` | Turns PowerPoint slides into slides of the deck: figures, tables, build steps, audio, layout, HTML in the deck's style. |
 | `lib/waveform.mjs` | Waveform SVGs for imported audio. |
 | `lib/omml.mjs` | PowerPoint equations (Office Math) to TeX. |
-| `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide pictures: PowerPoint or Keynote saves a PDF, macOS PDFKit renders pages and regions of it. |
+| `lib/pptx-render.mjs`, `lib/pdf-render.jxa.js` | Slide and PDF pictures: PowerPoint or Keynote (macOS) or LibreOffice (Linux) saves a PDF; macOS PDFKit or Poppler renders pages and regions of it. |
 | `lib/pdf.mjs` | PDF export: reveal.js print layout in headless Chrome, then print to PDF. |
 | `lib/eids.mjs` | Adds the `data-eid` attributes by editing the HTML as text. |
 | `lib/claude.mjs` | The long-running Claude Code process. |
@@ -344,7 +354,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * Moves are offsets (`translate`), so the space an element came from stays reserved. Ask Claude to turn hand edits into proper CSS when a layout should really change.
 * The undo history lives on the server and starts fresh when PinDeck restarts.
 * One writer at a time: PinDeck is not made for editing the same deck from two editors or tools at once.
-* Linux (beta): no PDF page pictures or PowerPoint import yet; tested hosts are listed in the release notes.
+* Linux (beta): pictures of PDF pages and PowerPoint slides, and waveforms of non-WAV audio, need
+  Poppler, LibreOffice and ffmpeg on the server (see [Running on a Linux server](#running-on-a-linux-server-beta)).
 
 ## Versions
 

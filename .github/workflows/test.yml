@@ -27,6 +27,11 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Syntax check
         run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
+      - name: Linux tools for PDF and PowerPoint pictures and audio (Poppler, LibreOffice, ffmpeg)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends poppler-utils ffmpeg libreoffice-impress
       - name: Find Chrome for the real-Chrome test
         run: |
           for c in "$(command -v google-chrome || true)" "$(command -v chromium || true)" \

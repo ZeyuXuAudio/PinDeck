@@ -712,7 +712,7 @@ async function pdfFigure({ file = "", page = "1", box = "", out = "", width = ""
   if (out && fs.existsSync(path.join(DECK_DIR, out)) && !state.pdfFigures.has(out)) return bad(`${out} exists already; choose another name.`, 409);
   const tmp = path.join(SHOT_DIR, `pdf-${slug(path.basename(abs, ".pdf"))}-p${n}-${Date.now()}.png`);
   await renderJobs(abs, [{ page: n, out: tmp, box: pts, scale }], STATE_DIR, { slideWidth: pw });
-  if (!fs.existsSync(tmp)) return bad("PDFKit did not write the picture.", 500);
+  if (!fs.existsSync(tmp)) return bad("The PDF page could not be rendered.", 500);
   const size = `${Math.round(pts[2] * scale)} × ${Math.round(pts[3] * scale)} px`;
   if (!out) return { text: `${tmp} (${size}). Read it; add a figures/ name to save it into the deck.` };
   const buf = fs.readFileSync(tmp);

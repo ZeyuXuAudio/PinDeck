@@ -32,13 +32,25 @@ test("claude is found on the PATH or through CLAUDE_BIN, never run", (t) => {
   assert.match(c.reason, /Editing by hand still works/);
 });
 
-test("Linux: Mac-only features off with reasons; Chrome features on unless turned off", (t) => {
-  const { p } = bin(t, "chromium");
+test("Linux: import on; tool features off with reasons until their tools exist; Chrome on unless turned off", (t) => {
+  const { p, dir } = bin(t, "chromium");
   const caps = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p } });
-  for (const k of ["pdfPages", "pptxImport", "pptxPictures", "audioConvert"]) {
+  for (const k of ["pdfPages", "pptxPictures", "audioConvert"]) {
     assert.equal(caps[k].available, false, k);
     assert.ok(caps[k].reason.length > 10, k);
   }
+  assert.match(caps.pdfPages.reason, /Poppler/);
+  assert.match(caps.pptxPictures.reason, /LibreOffice/);
+  assert.match(caps.audioConvert.reason, /ffmpeg/);
+  assert.equal(caps.pptxImport.available, true, "the import reads the .pptx itself");
+  // with the tools on the PATH (stand-ins here): each feature turns on
+  for (const name of ["pdftoppm", "pdfinfo", "soffice", "ffmpeg"]) fs.writeFileSync(path.join(dir, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const tools = detectCapabilities({ platform: "linux", env: { PATH: dir, CHROME_BIN: p } });
+  for (const k of ["pdfPages", "pptxPictures", "audioConvert"]) assert.equal(tools[k].available, true, k);
+  fs.rmSync(path.join(dir, "pdftoppm"));
+  const noPoppler = detectCapabilities({ platform: "linux", env: { PATH: dir, CHROME_BIN: p } });
+  assert.equal(noPoppler.pdfPages.available, false);
+  assert.equal(noPoppler.pptxPictures.available, false, "LibreOffice alone is not enough: Poppler renders its PDF");
   for (const k of ["screenshot", "pdfExport", "headlessLayout"]) assert.equal(caps[k].available, true, k);
   assert.equal(caps.chromePath, p);
   const off = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p, PINDECK_LINUX_CHROME: "0" } });
