@@ -33,6 +33,7 @@ import { readPptx } from "./lib/pptx.mjs";
 import { exportPdf as pptxToPdf, renderJobs, renderAvailable, pdfInfo } from "./lib/pptx-render.mjs";
 import { buildImport, planSlides } from "./lib/pptx-import.mjs";
 import { isSupportedPlatform, detectCapabilities, publicCapabilities, capabilityPrompt, parsePort, cliCommand, findExecutable } from "./lib/capabilities.mjs";
+import { unsupportedMessage } from "./lib/frameworks.mjs";
 import { writeAtomic, sameContent, revision, scanFiles, scanChanges } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
@@ -118,6 +119,12 @@ function checkDeck() {
 const deckProblem = checkDeck();
 if (deckProblem) {
   console.error(`${deckProblem}\n\n${USAGE}`);
+  process.exit(1);
+}
+// only reveal.js for now: another framework's deck is left exactly as it is (no ids, no state)
+const frameworkProblem = unsupportedMessage(fs.readFileSync(path.join(DECK_DIR, DECK_FILE), "utf8"), DECK_FILE);
+if (frameworkProblem) {
+  console.error(frameworkProblem);
   process.exit(1);
 }
 /* Runtime files hold the token, the chat and attachments: private to the user. Written only after the

@@ -386,6 +386,18 @@ test("Missing deck file: exits with its name, nothing written; a folder named li
   assert.equal((await s.api("status")).data.deckFile, "index.html");
 });
 
+test("A deck of another framework: refused with its name before anything is written", async (t) => {
+  const fx = fixture(t);
+  const marp = path.join(fx.deck, "marp.html");
+  const html = '<!doctype html><html><head><meta name="generator" content="marp-cli"></head><body><div class="marpit"></div></body></html>';
+  fs.writeFileSync(marp, html);
+  const r = await failedStart(t, fx, { deck: marp });
+  assert.equal(r.code, 1);
+  assert.match(r.output, /marp\.html is a Marp deck\. PinDeck works with reveal\.js decks only for now/);
+  assert.doesNotMatch(r.output, /Usage:/, "no usage text: the command was right");
+  assert.equal(fs.readFileSync(marp, "utf8"), html, "no ids added");
+});
+
 /* ---- Files outside the deck folder (--asset-root) and symlinks ----------------------------------- */
 test("Asset root: the deck is served inside it, so ../ paths work; nothing outside it", async (t) => {
   const fx = fixture(t);

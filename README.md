@@ -323,6 +323,8 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Current Limitations
 
+* reveal.js decks only. A deck made with another framework (Marp, Slidev, impress.js, remark, Spectacle,
+  Shower, deck.js, bespoke.js) is recognised and refused with its name before PinDeck changes anything.
 * Text inside inline SVG diagrams cannot be edited in place; pin it and ask Claude.
 * Parts of an inline SVG move with the whole SVG; inline text (bold, spans) moves with its block.
 * No indenting or outdenting of bullets with `Tab` yet, and `Backspace` at the start of a bullet does not merge it with the one above; ask Claude for those.
