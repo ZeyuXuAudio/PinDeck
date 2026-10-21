@@ -36,13 +36,13 @@ import { isSupportedPlatform, detectCapabilities, publicCapabilities, capability
 import { writeAtomic, sameContent, revision } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
-const USAGE = `Usage: pindeck [deck-folder] [--port 5180] [--model <name>]
-       pindeck login [deck-folder]
+const USAGE = `Usage: pindeck [deck-folder | deck-file.html] [--port 5180] [--model <name>]
+       pindeck login [deck-folder | deck-file.html]
 
-Opens the reveal.js deck in deck-folder (default: the current folder) in PinDeck.
-The folder must contain index.html.
+Opens a reveal.js deck in PinDeck: a deck file such as talk.html, or a folder (default: the current
+folder), which then opens its index.html.
 login prints a new one-time login link for the PinDeck running for that deck
-(without a folder: for the PinDeck started last).`;
+(without a deck: for the PinDeck started last).`;
 const EDITOR_DIR = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 if (argv.includes("--help") || argv.includes("-h")) { console.log(USAGE); process.exit(0); }
@@ -58,13 +58,21 @@ if (!isSupportedPlatform(process.platform)) {
 const LOGIN = argv[0] === "login";
 if (LOGIN) argv.shift();
 const MODEL = opt("--model", process.env.CLAUDE_MODEL || "");
-const DECK_DIR = path.resolve(argv[0] || process.cwd());
-const DECK_FILE = "index.html";
-const EDITABLE = ["index.html", "theme.css"];      // Claude may edit these
+/* The deck: a file (talk.html), or a folder, which means its index.html. A path ending in .html or .htm
+   that is not a folder is a file, so a missing file gets a clear message. */
+const TARGET = path.resolve(argv[0] || process.cwd());
+const isFolder = (() => { try { return fs.statSync(TARGET).isDirectory(); } catch { return false; } })();
+const DECK_DIR = isFolder || !/\.html?$/i.test(TARGET) ? TARGET : path.dirname(TARGET);
+const DECK_FILE = DECK_DIR === TARGET ? "index.html" : path.basename(TARGET);
+const NAMED = DECK_FILE !== "index.html";             // a deck file with its own name; several can share a folder
+const DECK_NAME = NAMED ? DECK_FILE.replace(/\.html?$/i, "") : path.basename(DECK_DIR);   // for exports and titles
+const EDITABLE = [DECK_FILE, "theme.css"];         // Claude may edit these
 const LOCKED = ["brand.css"];                      // never, enforced twice
 const HOME_DIR = process.env.PINDECK_HOME || path.join(os.homedir(), ".pindeck");
-const deckKey = path.basename(DECK_DIR).replace(/[^\w.-]+/g, "_") + "-" +
-  crypto.createHash("sha1").update(DECK_DIR).digest("hex").slice(0, 8);
+/* State per deck file. A folder's index.html keeps the key it always had, so existing chats and undo
+   histories stay; a named file gets its own, so two decks in one folder never share chat or undo. */
+const deckKey = (NAMED ? `${path.basename(DECK_DIR)}-${DECK_NAME}` : path.basename(DECK_DIR)).replace(/[^\w.-]+/g, "_") + "-" +
+  crypto.createHash("sha1").update(NAMED ? path.join(DECK_DIR, DECK_FILE) : DECK_DIR).digest("hex").slice(0, 8);
 const STATE_DIR = path.join(HOME_DIR, "decks", deckKey);
 const SHOT_DIR = path.join(STATE_DIR, "shots");
 const PDF_DIR = path.join(STATE_DIR, "attachments");   // attached PDFs: reading material, not part of the deck
@@ -267,7 +275,7 @@ function chrome(args, done) {
   });
 }
 const deckUrl = (mode, params = {}) =>
-  `${ORIGIN}/deck/${DECK_FILE}?` + new URLSearchParams({ editor: mode, showHiddenSlides: "true", ...params });
+  `${ORIGIN}/deck/${encodeURIComponent(DECK_FILE)}?` + new URLSearchParams({ editor: mode, showHiddenSlides: "true", ...params });
 async function takeShot(slide) {
   const pins = state.pins.filter((p) => p.slide.eid === slide.eid).map((p) => ({ n: p.n, eid: p.eid, at: p.at, point: p.point }));
   const out = path.join(SHOT_DIR, `${slide.eid.replace(/[^\w-]/g, "_")}-${Date.now()}.png`);
@@ -315,14 +323,14 @@ const snapshots = new Map();   // id -> static print layout, served at /deck/__p
 function exportPdf(kind, includeHidden = false) {
   if (!CAPS.pdfExport.available) return Promise.reject(Object.assign(new Error(`PDF export is not available: ${CAPS.pdfExport.reason}.`), { status: 501 }));
   const split = kind === "presentation";
-  const name = `${path.basename(DECK_DIR)}-${split ? "presentation" : "handout"}.pdf`;
+  const name = `${DECK_NAME}-${split ? "presentation" : "handout"}.pdf`;
   const out = path.join(DECK_DIR, "export", name);
   const profile = (step) => path.join(STATE_DIR, "chrome", `pdf-${process.pid}-${Date.now()}-${step}`);
   const run = async () => {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     const layoutProfile = profile("layout"), printProfile = profile("print");
     const html = await printLayout(CHROME, chromeStart(layoutProfile,
-      `${ORIGIN}/deck/${DECK_FILE}?editor=pdf&print-pdf&pdfSeparateFragments=${split}&showHiddenSlides=${!!includeHidden}`), layoutProfile);
+      `${ORIGIN}/deck/${encodeURIComponent(DECK_FILE)}?editor=pdf&print-pdf&pdfSeparateFragments=${split}&showHiddenSlides=${!!includeHidden}`), layoutProfile);
     const id = `${process.pid}-${++snapSeq}`;
     snapshots.set(id, html);
     try { await printPdf(CHROME, chromeStart(printProfile, `${ORIGIN}/deck/__pindeck-print-${id}.html`), out, printProfile); }
@@ -394,7 +402,10 @@ const status = () => ({ busy: state.busy, model: state.model, sessionId: state.s
 const pushStatus = () => broadcast("status", status());
 
 const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md"), "utf8")
-  .replaceAll("{{CLI}}", CLI_CMD) + capabilityPrompt(CAPS, CLI_CMD);
+  .replaceAll("{{CLI}}", CLI_CMD).replaceAll("{{DECK}}", DECK_FILE) + capabilityPrompt(CAPS, CLI_CMD) +
+  // a template's own notes usually say index.html; other decks may share this folder
+  (NAMED ? `\n\n## This deck's file\nThe slides are in ${DECK_FILE}. Where the deck's notes below say index.html, they mean ` +
+    `${DECK_FILE}. Other .html files in this folder are other decks: do not edit them.\n` : "");
 /* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
    or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
    MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
@@ -593,7 +604,7 @@ function buildPrompt({ text: userText, pins = [], selection, layouts = [], curre
   for (const L of layouts) ctx.push("Layout:\n" + formatLayout(L));
   if (screenshot) ctx.push(`Screenshot of slide ${screenshot.slide} with the pin markers: ${screenshot.path} (Read it).`);
   if (attachments.length) ctx.push("Attached files (the user added them to this message; they are saved in the deck folder, " +
-    "use these paths relative to index.html):\n" + attachments.map((a) => formatAttachment(a) + formatDrop(a)).join("\n"));
+    `use these paths relative to ${DECK_FILE}):\n` + attachments.map((a) => formatAttachment(a) + formatDrop(a)).join("\n"));
   return (ctx.length ? `<editor-context>\n${ctx.join("\n\n")}\n</editor-context>\n\n` : "") + userText;
 }
 
@@ -1049,7 +1060,7 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(DECK_DIR, p.slice(6) || DECK_FILE);
       if (!f) return text(res, 403, "Forbidden");
       const mode = url.searchParams.get("editor");
-      if (!mode || !f.endsWith(".html")) return serveFile(res, f, null, req);
+      if (!mode || !/\.html?$/i.test(f)) return serveFile(res, f, null, req);
       return serveFile(res, f, (s) => {
         // headless runs must not stream media, or Chrome never finishes the page
         if (mode === "shot" || mode === "dump" || mode === "pdf") s = s.replace(/\bpreload="(auto|metadata)"/g, 'preload="none"');

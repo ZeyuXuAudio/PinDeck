@@ -31,7 +31,8 @@ let measure = null;     // { iframe, bridge }
 let measureReady = null, measureResolve = null;
 
 // showHiddenSlides: PinDeck shows hidden slides so they can be edited (reveal.js drops them otherwise)
-function deckSrc(mode, extra = "") { return `/deck/index.html?editor=${mode}&showHiddenSlides=true${extra}`; }
+// /deck/ is the deck file the server was started with (index.html, or a named file such as talk.html)
+function deckSrc(mode, extra = "") { return `/deck/?editor=${mode}&showHiddenSlides=true${extra}`; }
 
 function loadMain() {
   const f = document.createElement("iframe");
@@ -492,7 +493,7 @@ $("export-menu").addEventListener("click", async (e) => {
 
 $("present").onclick = () => {
   const ix = main?.bridge.indices(state.current) || { h: 0, v: 0 };
-  window.open(`/deck/index.html#/${ix.h}${ix.v ? "/" + ix.v : ""}`, "_blank");
+  window.open(`/deck/#/${ix.h}${ix.v ? "/" + ix.v : ""}`, "_blank");
 };
 
 /* ---- Pins --------------------------------------------------------------------------------------- */
@@ -599,7 +600,7 @@ function entryHtml(e) {
         if (t?.undone) parts.push("<span>undone</span>");
       } else if (!e.error) parts.push("No file changes");
       if (e.restored?.length) parts.push(`<span class="warn">${esc(e.restored.join(", "))} is locked; the change was reverted.</span>`);
-      if (e.denials?.length) parts.push(`<span class="warn" title="PinDeck lets Claude run only its own commands (layout, shot, slides, pdf) and edit index.html and theme.css">` +
+      if (e.denials?.length) parts.push(`<span class="warn" title="PinDeck lets Claude run only its own commands (layout, shot, slides, pdf) and edit ${esc(state.status?.deckFile || "index.html")} and theme.css">` +
         `Not allowed in PinDeck, so skipped: ${e.denials.map((d) => esc(`${d.name} ${d.detail}`)).join(", ")}</span>`);
       if (e.duration) parts.push(`<span class="meta">${(e.duration / 1000).toFixed(1)} s</span>`);
       return parts.join(" ");
@@ -739,12 +740,14 @@ document.addEventListener("keydown", (e) => {
 /* ---- Server events ---------------------------------------------------------------------------------- */
 function applyStatus(s) {
   state.status = s;
-  // the deck's name in the header ("ocean-example"), its full path on hover
+  // the deck's name in the header ("ocean-example", or "talk.html" for a named deck file), its full path on hover
   if (s.deck) {
     const folder = s.deck.split(/[\\/]/).filter(Boolean).pop() || s.deck;
-    $("deck-name").textContent = folder;
+    const name = s.deckFile && s.deckFile !== "index.html" ? s.deckFile : folder;
+    $("deck-name").textContent = name;
     $("deck-name").title = `${s.deck}/${s.deckFile || "index.html"}`;
-    document.title = `${folder} · PinDeck`;
+    if ($("deck-file")) $("deck-file").textContent = s.deckFile || "index.html";
+    document.title = `${name} · PinDeck`;
   }
   setBusy(!!s.busy);
   $("model").textContent = modelLabel(s);

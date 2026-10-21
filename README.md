@@ -21,7 +21,7 @@ checked the layout; the next request, still being typed, refers to the new pins 
 * **Edit by hand, too.** Move, resize and nudge elements with snapping, edit text in place (math stays
   TeX), write speaker notes, add, hide, move and delete slides. One undo history covers your edits and
   Claude's.
-* **Stay on brand.** `brand.css` is locked: Claude edits `index.html` and `theme.css` only, and checks
+* **Stay on brand.** `brand.css` is locked: Claude edits the deck file and `theme.css` only, and checks
   its own work with PinDeck's layout command.
 * **Bring material in.** Attach figures, audio and PDFs to a message, or import slides from PowerPoint
   into the deck's own layouts.
@@ -47,10 +47,12 @@ once and logs this browser in; for a new one, run `pindeck login` (or `node serv
 with your normal Claude account. Chrome (or Chromium, Edge, Brave) is optional and is used for
 screenshots and PDF export; PowerPoint or Keynote (macOS) for pictures in the PowerPoint import.
 
-PinDeck adds element ids to the deck's `index.html` when it opens it (see below), so try it on a copy
-of a deck first. Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
-`~/.pindeck/config.json`), `--help`. The deck folder defaults to the current folder and must contain
-`index.html`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck/` (change with
+The deck is a file (`pindeck path/to/talk.html`) or a folder, which opens its `index.html`; without
+one, the current folder. Several decks can share a folder, each with its own chat and undo history;
+they share the folder's `theme.css` and `brand.css`, and Claude edits only the deck that is open.
+PinDeck adds element ids to the deck file when it opens it (see below), so try it on a copy of a deck
+first. Options: `--port 5180`, `--model <name>` (for this run only; otherwise the model in
+`~/.pindeck/config.json`), `--help`. Runtime files (chat history, screenshots, backups) are kept in `~/.pindeck/` (change with
 `PINDECK_HOME`), not in the deck. `ocean-example/` is a complete example deck to start from.
 
 ## Preparing a deck
@@ -269,7 +271,7 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * **One Claude Code process.** The server starts `claude -p` in stream-json mode once and keeps it
   running, so there is no start-up delay per message. It runs in the deck folder under your Claude
   login, with `--append-system-prompt` from `lib/system-prompt.md` and the deck's `CLAUDE.md`.
-* **Permissions.** Claude may read files, edit `index.html` and `theme.css`, and run the editor's
+* **Permissions.** Claude may read files, edit the deck file (`index.html` or the named one) and `theme.css`, and run the editor's
   CLI. Nothing else, and in particular no edits to `brand.css`. Claude Code loads no settings files
   and no MCP servers, so no allow rule in your own, the deck's or a parent folder's settings widens this. If `brand.css` changes during a
   turn anyway, the server restores it and says so in the chat.

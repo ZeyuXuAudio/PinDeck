@@ -13,7 +13,7 @@
                                     from the top left), as PNG: without a name in the screenshots
                                     folder to look at, with one saved into the deck
 
-   node cli.mjs git-setup [deck]    keep PinDeck's data-eid ids out of git (no server needed)
+   node cli.mjs git-setup [deck]    keep PinDeck's data-eid ids out of git (no server needed; a folder or deck file)
 
    <slide> is a slide id (data-eid), a slide number (1-based) or "current". */
 
@@ -32,6 +32,7 @@ const arg = rest[0];
 if (cmd === "git-setup") {
   const FILTER = `sed 's/ data-eid="[^"]*"//g'`;
   let deck = path.resolve(arg || ".");
+  try { if (!fs.statSync(deck).isDirectory()) deck = path.dirname(deck); } catch {}   // a deck file: its folder
   try { deck = fs.realpathSync(deck); } catch {}   // git reports the real path; a symlinked path would not match
   const git = (...a) => execFileSync("git", ["-C", deck, ...a], { encoding: "utf8" }).trim();
   let root;

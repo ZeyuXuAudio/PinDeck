@@ -329,6 +329,64 @@ test("Missing deck or index.html: exits with a message, nothing written", async 
   assert.equal(r.code, 1);
   assert.match(r.output, /No index\.html/);
 });
+test("Missing deck file: exits with its name, nothing written; a folder named like a file is a folder", async (t) => {
+  const fx = fixture(t);
+  const r = await failedStart(t, fx, { deck: path.join(fx.deck, "nope.html") });
+  assert.equal(r.code, 1);
+  assert.match(r.output, /No nope\.html in /);
+  const odd = path.join(fx.root, "slides.html");   // a folder, so its index.html
+  fs.cpSync(EXAMPLE, odd, { recursive: true });
+  const s = await startServer(t, fx, { deck: odd });
+  assert.equal((await s.api("status")).data.deckFile, "index.html");
+});
+
+/* ---- Named deck files (talk.html), several in one folder ---------------------------------------- */
+test("A named deck file: served, edited, given ids and permissions, with state of its own beside index.html", async (t) => {
+  const fx = fixture(t);
+  const name = "my talk.html";   // a space, for the URLs
+  const talk = path.join(fx.deck, name), index = path.join(fx.deck, "index.html");
+  fs.copyFileSync(index, talk);
+  const indexBefore = sha(index);
+  const s = await startServer(t, fx, { deck: talk });
+  const st = (await s.api("status")).data;
+  assert.equal(st.deckFile, name);
+  assert.equal(fs.realpathSync(st.deck), fs.realpathSync(fx.deck));
+  // the editor loads /deck/, which is this file, with the bridge
+  const page = await (await fetch(`${s.url}/deck/?editor=main`, { headers: { "x-editor-token": s.token } })).text();
+  assert.match(page, /<script src="\/editor\/bridge\.js"><\/script>/);
+  assert.equal(sha(index), indexBefore, "index.html untouched");
+
+  // Claude may edit this file (and theme.css), and is told its name
+  const start = await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start");
+  const a = start.argv;
+  const allowed = a.slice(a.indexOf("--allowedTools") + 1, a.indexOf("--disallowedTools"));
+  assert.ok(allowed.includes(`Edit(./${name})`) && allowed.includes("Edit(./theme.css)") && !allowed.includes("Edit(./index.html)"));
+  const prompt = a[a.indexOf("--append-system-prompt") + 1];
+  assert.match(prompt, /- my talk\.html: the slides\. theme\.css: the styles\./);
+  assert.match(prompt, /## This deck's file\nThe slides are in my talk\.html\. Where the deck's notes below say index\.html/);
+  const own = prompt.slice(0, prompt.indexOf("## This deck's file"));
+  assert.doesNotMatch(own, /index\.html/, "PinDeck's own instructions name the deck file");
+
+  // a hand edit lands in this file; undo restores it
+  const eid = /<section[^>]*data-eid="([^"]+)"/.exec(fs.readFileSync(talk, "utf8"))[1];
+  const r = await s.api("notes", { eid, text: "Notes for the named deck", rev: st.rev });
+  assert.equal(r.status, 200);
+  assert.match(fs.readFileSync(talk, "utf8"), /Notes for the named deck/);
+  assert.equal(sha(index), indexBefore);
+  assert.equal((await s.api("undo", {})).status, 200);
+  assert.doesNotMatch(fs.readFileSync(talk, "utf8"), /Notes for the named deck/);
+
+  // index.html in the same folder at the same time: its own state, chat and login
+  const s2 = await startServer(t, fx);
+  assert.equal((await s2.api("status")).data.deckFile, "index.html");
+  const dirs = (k) => fs.readdirSync(path.join(fx.home, "decks")).filter(k);
+  assert.equal(dirs((d) => d.includes("my_talk")).length, 1, "the named deck's state");
+  assert.equal(dirs(() => true).length, 2, "two decks, two state folders");
+  const env = { ...process.env, PINDECK_HOME: fx.home };
+  const out = spawnSync(process.execPath, [SERVER, "login", talk], { env, encoding: "utf8" }).stdout;
+  assert.ok(out.includes(`:${s.port}/login?code=`), "login for the named deck reaches its server");
+});
+
 test("Read-only deck folder: refused before anything is written", { skip: process.getuid?.() === 0 && "root ignores permissions" }, async (t) => {
   const fx = fixture(t);
   fs.chmodSync(fx.deck, 0o555);
