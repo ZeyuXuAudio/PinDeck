@@ -307,8 +307,26 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 * One writer at a time: PinDeck is not made for editing the same deck from two editors or tools at once.
 * Linux (beta): no screenshots, PDF export, PDF page pictures or PowerPoint import yet; tested hosts are
   listed in the release notes.
+* Shared servers: other users logged in to the same machine can read the editor's token and the deck
+  (fixed in 2.9.0-beta.3). Until then, use PinDeck only on servers where you trust all users.
 
 ## Versions
+
+* **2.9.0-beta.2** (2.9 beta): fixes from the first remote tests. Audio and video play in Safari: deck files
+  are sent with their length and byte ranges, and ogg, opus, m4a, aac, flac and mov get their media types.
+  A tunnel may use another local port than the server (`-L 8080:127.0.0.1:5180`). The points raised in
+  testing:
+  1. Wrong CLI path for decks outside the PinDeck folder: fixed. Claude gets the right command, and the
+     example's `CLAUDE.md` no longer names a path.
+  2. Files outside the deck folder: planned for 2.10.
+  3. Deck file other than `index.html`: planned for 2.10.
+  4. Claude editing other files of the deck: planned for 2.10.
+  5. `CLAUDE.md` in parent folders and `AGENTS.md`: the deck's `AGENTS.md` in 2.9.0-beta.3, parent folders
+     as an option.
+  6. Other slide frameworks than reveal.js: 2.10 recognises them and says so; support for more later.
+  7. Several decks in one server: planned for 2.10 or 2.11; run one PinDeck per deck meanwhile.
+  8. Other users on a shared server can read the editor's token: security fix in 2.9.0-beta.3. Until
+     then, use PinDeck only on servers where you trust all users.
 
 * **2.9.0-beta.1** (2.9 beta): runs on Linux as a headless server, used from a Mac's browser through an
   SSH tunnel, with Claude Code running on the server. Features a system cannot provide are switched off
