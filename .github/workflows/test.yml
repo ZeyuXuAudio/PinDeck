@@ -1,10 +1,11 @@
 # Tests on real Linux and macOS, Node 22 and 24. The tests start PinDeck servers on copies of the example
-# deck with a fake claude (test/fixtures/fake-claude): no Claude login, no network, no AI.
+# deck with a fake claude (test/fixtures/fake-claude): no Claude login, no network, no AI. Screenshots,
+# headless layout and PDF export run with the runner's real Chrome.
 name: Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, "linux-*"]
   pull_request:
 
 permissions:
@@ -26,6 +27,14 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Syntax check
         run: for f in server.mjs cli.mjs lib/*.mjs public/*.js; do node --check "$f"; done
+      - name: Find Chrome for the real-Chrome test
+        run: |
+          for c in "$(command -v google-chrome || true)" "$(command -v chromium || true)" \
+                   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
+            if [ -n "$c" ] && [ -x "$c" ]; then echo "PINDECK_TEST_CHROME=$c" >> "$GITHUB_ENV"; break; fi
+          done
       - name: Record the system
-        run: uname -srm && node --version && git --version
+        run: |
+          uname -srm && node --version && git --version
+          echo "Chrome for tests: ${PINDECK_TEST_CHROME:-none}"
       - run: npm test

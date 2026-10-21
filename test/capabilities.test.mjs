@@ -32,18 +32,20 @@ test("claude is found on the PATH or through CLAUDE_BIN, never run", (t) => {
   assert.match(c.reason, /Editing by hand still works/);
 });
 
-test("Linux: Mac-only features off with reasons; Chrome features only when opted in", (t) => {
+test("Linux: Mac-only features off with reasons; Chrome features on unless turned off", (t) => {
   const { p } = bin(t, "chromium");
   const caps = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p } });
-  for (const k of ["pdfPages", "pptxImport", "pptxPictures", "audioConvert", "screenshot", "pdfExport", "headlessLayout"]) {
+  for (const k of ["pdfPages", "pptxImport", "pptxPictures", "audioConvert"]) {
     assert.equal(caps[k].available, false, k);
     assert.ok(caps[k].reason.length > 10, k);
   }
-  assert.equal(caps.chromePath, null);
-  const on = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p, PINDECK_LINUX_CHROME: "1" } });
-  assert.equal(on.screenshot.available, true);
-  assert.equal(on.chromePath, p);
-  const missing = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: "/no/chrome", PINDECK_LINUX_CHROME: "1" } });
+  for (const k of ["screenshot", "pdfExport", "headlessLayout"]) assert.equal(caps[k].available, true, k);
+  assert.equal(caps.chromePath, p);
+  const off = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: p, PINDECK_LINUX_CHROME: "0" } });
+  assert.equal(off.screenshot.available, false);
+  assert.match(off.screenshot.reason, /PINDECK_LINUX_CHROME=0/);
+  assert.equal(off.chromePath, null);
+  const missing = detectCapabilities({ platform: "linux", env: { PATH: "", CHROME_BIN: "/no/chrome" } });
   assert.match(missing.screenshot.reason, /CHROME_BIN: \/no\/chrome does not exist/);
 });
 
