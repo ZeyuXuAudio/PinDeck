@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { findExecutable } from "../lib/capabilities.mjs";
 import { pdfInfo, renderJobs, exportPdf, renderAvailable } from "../lib/pptx-render.mjs";
 import { waveformSvg } from "../lib/waveform.mjs";
@@ -117,7 +118,7 @@ test("LibreOffice: a PowerPoint file to PDF with its hidden slide, then pictures
  </office:presentation></office:body>
 </office:document>`);
   const soffice = findExecutable("soffice").path || findExecutable("libreoffice").path;
-  execFileSync(soffice, ["--headless", "--norestore", `-env:UserInstallation=file://${path.join(dir, "profile")}`,
+  execFileSync(soffice, ["--headless", "--norestore", `-env:UserInstallation=${pathToFileURL(path.join(dir, "profile")).href}`,
     "--convert-to", "pptx", "--outdir", dir, fodp], { timeout: 240000 });
   const pptx = path.join(dir, "talk.pptx");
   assert.ok(fs.existsSync(pptx), "LibreOffice made the .pptx");
