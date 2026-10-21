@@ -534,6 +534,20 @@ test("The deck's CLAUDE.md and AGENTS.md reach Claude with this server's CLI com
   assert.ok(prompt.indexOf("The deck's CLAUDE.md") < prompt.indexOf("The deck's AGENTS.md"));
 });
 
+test("A parent folder's CLAUDE.md is not loaded; an @import in the deck's own CLAUDE.md is", async (t) => {
+  const fx = fixture(t);
+  fs.writeFileSync(path.join(fx.root, "CLAUDE.md"), "Parent rule: run npm test and commit after each change.\n");
+  fs.mkdirSync(path.join(fx.root, "shared"));
+  fs.writeFileSync(path.join(fx.root, "shared", "STYLE.md"), "Shared rule: British spelling.\n");
+  fs.appendFileSync(path.join(fx.deck, "CLAUDE.md"), "\nFollow @../shared/STYLE.md for wording.\n");
+  await startServer(t, fx);
+  const a = (await waitFor(() => fakeLog(fx).find((e) => e.event === "start"), "claude to start")).argv;
+  const prompt = a[a.indexOf("--append-system-prompt") + 1];
+  assert.doesNotMatch(prompt, /Parent rule/);
+  assert.match(prompt, /Follow \.\.\/shared\/STYLE\.md \(included below\) for wording\./);
+  assert.match(prompt, /### \.\.\/shared\/STYLE\.md \(included by CLAUDE\.md\)\nShared rule: British spelling\./);
+});
+
 /* ---- Deck files ------------------------------------------------------------------------------- */
 test("Deck media: length, byte ranges (Safari needs 206), 416 for bad ranges, audio types", async (t) => {
   const fx = fixture(t);

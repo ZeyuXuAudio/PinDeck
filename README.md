@@ -93,6 +93,19 @@ cp -R ocean-example my-template
    example's `CLAUDE.md` does; PinDeck tells Claude the right path wherever the deck is. An older
    `node ../cli.mjs` in a deck's `CLAUDE.md` is replaced with that command.
 
+**Instructions for Claude.** PinDeck gives Claude the deck folder's own `CLAUDE.md` and `AGENTS.md`.
+It does not load `CLAUDE.md` files from parent folders, as Claude Code does in a terminal: those are
+usually written for coding (run the tests, commit), which PinDeck's Claude cannot do; they would change
+with where the deck happens to sit; and on a shared server a parent folder may be writable by others.
+To share rules between decks, say so in the deck's own file, in one of two ways:
+
+- **Import:** `Follow @../shared/STYLE.md for wording.` includes that file's text. Paths are relative to
+  the file they are in (or absolute, or `~/...`); imported files may import others, up to 5 levels,
+  each file once, 200 KB in all. Only text files are imported; an e-mail address, an `@name` that is
+  not a file, and anything in code are left as written.
+- **Pointer:** `The style rules are in ../shared/STYLE.md; read them first.` Claude reads the file when
+  it needs it.
+
 **New slide** and the PowerPoint import model new slides on the deck's own: keep a slide with class
 `title-slide`, one with `section-slide`, and a content slide with `.slide-head` (`h2`, optionally a
 `.kicker` or `.sub`) and `.slide-body`. Imported tables take the class of the deck's first table,

@@ -34,6 +34,7 @@ import { exportPdf as pptxToPdf, renderJobs, renderAvailable, pdfInfo } from "./
 import { buildImport, planSlides } from "./lib/pptx-import.mjs";
 import { isSupportedPlatform, detectCapabilities, publicCapabilities, capabilityPrompt, parsePort, cliCommand, findExecutable } from "./lib/capabilities.mjs";
 import { unsupportedMessage } from "./lib/frameworks.mjs";
+import { readInstructions } from "./lib/instructions.mjs";
 import { writeAtomic, sameContent, revision, scanFiles, scanChanges } from "./lib/deck-files.mjs";
 
 /* ---- Config ------------------------------------------------------------------ */
@@ -471,12 +472,6 @@ const systemPrompt = fs.readFileSync(path.join(EDITOR_DIR, "lib/system-prompt.md
   (ASSET_ROOTS.length ? `\n\n## Files outside the deck folder\nThe deck may use files in ${ASSET_ROOTS.join(", ")}: refer to ` +
     `them with paths relative to ${DECK_FILE} (such as ../shared/style.css). You can read them; do not edit them, ` +
     `other decks may use them too.\n` : "");
-/* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
-   or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
-   MCP servers have no place in a slide editor). That also skips the deck's CLAUDE.md, so it goes into
-   the system prompt instead, read afresh at each session start, together with the deck's AGENTS.md (the
-   name other coding agents read). Decks copied from the example call the CLI as `node ../cli.mjs`, which
-   is right only next to PinDeck: that becomes this server's command. */
 /* What Claude may never change, whatever the edit rules allow: the locked brand files, vendored libraries,
    git's own files, and other decks in this folder (a named deck shares its folder with them). Deny rules
    win over allow rules; a locked file changed anyway is restored after the turn (lock 2 in finishTurn). */
@@ -485,10 +480,16 @@ function lockedPaths() {
   try { others = fs.readdirSync(DECK_DIR).filter((f) => /\.html?$/i.test(f) && f !== DECK_FILE); } catch {}
   return [...LOCKED, "vendor/**", ".git/**", ...others];
 }
+/* Claude Code loads no settings files (--setting-sources ""): an allow rule in the user's, the deck's
+   or a parent repo's settings would let Claude run more than PinDeck grants (and the user's hooks and
+   MCP servers have no place in a slide editor). That also skips CLAUDE.md files, so the deck's own go
+   into the system prompt instead, read afresh at each session start: CLAUDE.md and AGENTS.md (the name
+   other coding agents read), with their @path imports (lib/instructions.mjs). Parent folders' files are
+   not loaded; a deck imports shared rules explicitly. Decks copied from the example call the CLI as
+   `node ../cli.mjs`, which is right only next to PinDeck: that becomes this server's command. */
 function deckInstructions() {
   return ["CLAUDE.md", "AGENTS.md"].map((name) => {
-    let s;
-    try { s = fs.readFileSync(path.join(DECK_DIR, name), "utf8").trim(); } catch { return ""; }
+    const s = readInstructions(path.join(DECK_DIR, name));
     return s ? `\n\n## The deck's ${name}\n${s.replace(/node \.\.\/cli\.mjs\b/g, () => CLI_CMD)}\n` : "";
   }).join("");
 }
