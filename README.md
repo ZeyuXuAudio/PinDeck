@@ -359,6 +359,23 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
+* **2.10.0-beta.1** (2.10 beta): decks with their own file names and shared files, and Claude working
+  on the whole deck.
+  - A deck file by name: `pindeck path/to/talk.html` (a folder still opens its `index.html`). Several
+    decks can share a folder, each with its own chat and undo history.
+  - Claude may edit and create other files of the deck (scripts, style sheets, notes), never
+    `brand.css`, `vendor/` or other decks in the folder. One Undo takes back everything a turn changed,
+    created or deleted; files over 2 MB are not copied, and the chat says so.
+  - Files outside the deck folder: `--asset-root <folder>` (or `"assetRoots"` in config.json) serves
+    the deck from inside that folder, so paths such as `../shared/style.css` work in the editor,
+    screenshots and PDF exports. A symlink that leads out of the deck and its asset roots is refused.
+  - Shared instructions: the deck's `CLAUDE.md` and `AGENTS.md` may import other files with `@path`.
+    `CLAUDE.md` files in parent folders are still not loaded, on purpose (see the README).
+  - Decks made with other slide frameworks (Marp, Slidev, impress.js, remark and others) are
+    recognised and refused with their name, before PinDeck changes anything.
+  - Linux: pictures of PDF pages with Poppler, the PowerPoint import with slide pictures from
+    LibreOffice, and waveforms of non-WAV audio with ffmpeg, each when installed.
+
 * **2.9**: Linux as a beta, and safer editing.
   - Linux (beta): PinDeck runs as a headless server, used from a Mac's browser through an SSH tunnel,
     with Claude Code running on the server. The tunnel may use another local port than the server.
