@@ -67,18 +67,24 @@ function spawnServer(fx, { platform = REAL, env = {}, args = ["--port", "0"], de
       CLAUDE_BIN: FAKE_CLAUDE, FAKE_CLAUDE_LOG: fx.log, CHROME_BIN: path.join(fx.root, "no-chrome"),
       PINDECK_LINUX_CHROME: "", CLAUDE_MODEL: "", PORT: "", ...env },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: true,   // its own process group, so a test can stop it together with the claude it started
   });
   let out = "", err = "";
   child.stdout.on("data", (d) => { out += d; });
   child.stderr.on("data", (d) => { err += d; });
   const exited = new Promise((r) => child.once("exit", (code, signal) => r({ code, signal })));
-  return { child, exited, output: () => out + err };
+  const killAll = async () => {
+    const running = child.exitCode === null && child.signalCode === null;
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}   // the server and everything it started
+    if (running) await exited;
+  };
+  return { child, exited, killAll, output: () => out + err };
 }
 
 async function startServer(t, fx, opts = {}) {
   const s = spawnServer(fx, opts);
   fx.stops.push(async () => {
-    if (s.child.exitCode === null && s.child.signalCode === null) { s.child.kill("SIGKILL"); await s.exited; }
+    await s.killAll();
     for (const pid of fakePids(fx)) if (alive(pid)) process.kill(pid, "SIGKILL");
   });
   const url = await waitFor(() => /PinDeck: (http:\/\/127\.0\.0\.1:\d+)\//.exec(s.output())?.[1] ||
@@ -293,7 +299,7 @@ test("Restart: a new token; the old one is refused (the editor reloads on 403)",
 async function failedStart(t, fx, opts) {
   const before = sha(path.join(fx.deck, "index.html"));
   const s = spawnServer(fx, opts);
-  fx.stops.push(async () => s.child.kill("SIGKILL"));
+  fx.stops.push(s.killAll);
   const r = await Promise.race([s.exited, sleep(10000).then(() => ({ code: "timeout" }))]);
   assert.equal(sha(path.join(fx.deck, "index.html")), before, "deck unchanged");
   assert.equal(fs.existsSync(fx.home), false, "no state written");
