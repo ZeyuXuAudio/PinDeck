@@ -626,21 +626,34 @@ function events(t, s) {
   return list;
 }
 
-test("Edits by another process reach the editor with the new revision and get element ids", async (t) => {
-  const fx = fixture(t);
-  const s = await startServer(t, fx);
-  const list = events(t, s);
-  const hello = await waitFor(() => list.find((e) => e.ev === "hello"), "hello");
-  assert.equal(hello.data.rev, (await s.api("status")).data.rev);
-  // a separate process writes the deck, the way another editor would (temporary file, then rename)
-  const file = path.join(fx.deck, "index.html");
-  const html = fs.readFileSync(file, "utf8").replace(/(<section class="slide"[^>]*>)/, '$1\n<p class="from-outside">Added outside</p>');
-  execFileSync(process.execPath, ["-e", `const fs=require("fs");fs.writeFileSync(process.argv[1]+".tmp~",process.argv[2]);fs.renameSync(process.argv[1]+".tmp~",process.argv[1])`, file, html]);
-  const ev = await waitFor(() => list.find((e) => e.ev === "files" && e.data.files.includes("index.html")), "a files event");
-  assert.equal(ev.data.manual, false);
-  await waitFor(() => /<p class="from-outside" data-eid="[^"]+">/.test(fs.readFileSync(file, "utf8")), "the new element's id", 5000);
-  await waitFor(async () => list.at(-1).data.rev === (await s.api("status")).data.rev, "the latest revision");
-});
+/* On Linux, Node's recursive watch lost a file once it was replaced by a rename: the second save went unseen */
+for (const platform of [...new Set([REAL, "linux"])]) {
+  const mocked = platform !== REAL ? ` (process.platform mocked on ${REAL}: code path only)` : "";
+  test(`${platform}${mocked}: edits by another process reach the editor with the new revision and get element ids, every time`, async (t) => {
+    const fx = fixture(t);
+    const s = await startServer(t, fx, { platform });
+    const list = events(t, s);
+    const hello = await waitFor(() => list.find((e) => e.ev === "hello"), "hello");
+    assert.equal(hello.data.rev, (await s.api("status")).data.rev);
+    // a separate process writes the deck, the way another editor would (temporary file, then rename)
+    const file = path.join(fx.deck, "index.html");
+    for (const n of [1, 2, 3]) {
+      const seen = list.length;
+      const html = fs.readFileSync(file, "utf8").replace(/(<section class="slide"[^>]*>)/, `$1\n<p class="from-outside-${n}">Added outside</p>`);
+      execFileSync(process.execPath, ["-e", `const fs=require("fs");fs.writeFileSync(process.argv[1]+".tmp~",process.argv[2]);fs.renameSync(process.argv[1]+".tmp~",process.argv[1])`, file, html]);
+      const ev = await waitFor(() => list.slice(seen).find((e) => e.ev === "files" && e.data.files.includes("index.html")), `a files event for save ${n}`);
+      assert.equal(ev.data.manual, false);
+      await waitFor(() => new RegExp(`<p class="from-outside-${n}" data-eid="[^"]+">`).test(fs.readFileSync(file, "utf8")), `the new element's id (save ${n})`, 5000);
+      await waitFor(async () => list.at(-1).data.rev === (await s.api("status")).data.rev, `the latest revision (save ${n})`);
+    }
+    // a folder created later is watched too
+    fs.mkdirSync(path.join(fx.deck, "later"));
+    await sleep(300);
+    const seen = list.length;
+    fs.writeFileSync(path.join(fx.deck, "later", "note.css"), "/* new */\n");
+    await waitFor(() => list.slice(seen).find((e) => e.ev === "files" && e.data.files.includes("later/note.css")), "a files event in a new folder");
+  });
+}
 
 test("A deck file missing for a moment (replace by delete and recreate) does not stop the server", async (t) => {
   const fx = fixture(t);

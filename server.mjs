@@ -17,6 +17,7 @@
    Runtime files (chat, screenshots, backups) live in ~/.pindeck, never in the deck or the package. */
 
 import http from "node:http";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -672,8 +673,46 @@ function scheduleFlush() {
     broadcast("files", { files, manual, rev: deckRev() });
   }, 120);
 }
+/* Linux: Node's recursive watch follows files by inode there, and loses a file once it is replaced by a
+   rename, the way most editors and PinDeck itself save: later changes to index.html went unseen. Watching
+   every folder (inotify on directories) keeps working; folders created later are added as they appear.
+   Hidden folders (.git) and node_modules are skipped. */
+function watchFolders(root, onEvent) {
+  const watchers = new Map(), tree = new EventEmitter();
+  const add = (dir) => {
+    if (watchers.has(dir)) return;
+    let w;
+    try {
+      w = fs.watch(dir, (ev, name) => {
+        if (name == null) return onEvent(ev, null);
+        const abs = path.join(dir, String(name));
+        if (ev === "rename") { try { if (fs.statSync(abs).isDirectory()) scan(abs); } catch {} }
+        onEvent(ev, path.relative(root, abs));
+      });
+    } catch (e) {
+      if (dir === root) throw e;
+      return;
+    }
+    w.on("error", (e) => {
+      try { w.close(); } catch {}
+      watchers.delete(dir);
+      if (dir === root) tree.emit("error", e);   // a removed subfolder just drops out
+    });
+    watchers.set(dir, w);
+  };
+  const scan = (dir) => {
+    add(dir);
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch {}
+    for (const d of entries) if (d.isDirectory() && !d.name.startsWith(".") && d.name !== "node_modules") scan(path.join(dir, d.name));
+  };
+  scan(root);
+  tree.close = () => { for (const w of watchers.values()) try { w.close(); } catch {} watchers.clear(); };
+  return tree;
+}
 function startWatcher() {
-  watcher = fs.watch(DECK_DIR, { recursive: true }, onFileEvent);
+  watcher = process.platform === "linux" ? watchFolders(DECK_DIR, onFileEvent)
+    : fs.watch(DECK_DIR, { recursive: true }, onFileEvent);
   watcher.on("error", (e) => {
     console.error(`Watching ${DECK_DIR} failed (${e.message}); starting again.`);
     try { watcher.close(); } catch {}
