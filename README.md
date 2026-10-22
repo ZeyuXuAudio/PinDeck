@@ -2,8 +2,9 @@
 
 > **macOS, and Linux as a beta · Version 3 beta preview** (`3.0.0-beta.1`). On Linux, PinDeck runs as a
 > headless server that you use from your Mac's browser through an SSH tunnel (see
-> [Running on a Linux server](#running-on-a-linux-server-beta)). Windows is not supported. The beta uses
-> npm’s `beta` channel; stable releases use `latest`. See availability and installation below.
+> [Running on a Linux server](#running-on-a-linux-server-beta)). Windows is not supported. The beta is on
+> npm’s `beta` channel and the [`v3-beta`](https://github.com/ehabets/PinDeck/tree/v3-beta) branch; stable
+> releases (`npx pindeck`) stay on 2.x. See installation below.
 
 **Pin it. Say it. Done.** PinDeck is a local editor for HTML slide decks (reveal.js): the slides on
 the left, the slide in the middle, and a chat with Claude Code or OpenAI Codex on the right. You click elements to
@@ -36,7 +37,7 @@ npm installation rejects other operating systems. Overriding that check does not
 supported. Running the server from a cloned repository on another OS shows a local support notice
 instead of opening the deck or starting a backend.
 
-Install the public beta once `3.0.0-beta.1` has been published:
+Install the beta from npm:
 
 ```bash
 npx pindeck@beta /path/to/deck
@@ -44,7 +45,7 @@ npx pindeck@beta /path/to/deck
 npx pindeck@3.0.0-beta.1 /path/to/deck
 ```
 
-For the source preview, once the `v3-beta` branch is public:
+Or run it from the `v3-beta` branch, which includes the example deck:
 
 ```bash
 git clone --branch v3-beta --single-branch https://github.com/ehabets/PinDeck.git PinDeck-v3
@@ -52,11 +53,8 @@ cd PinDeck-v3
 node server.mjs ocean-example
 ```
 
-**Availability:** this checkout contains the prepared beta; its branch and npm package have not yet
-been published. Until then, run `node server.mjs ocean-example` from your local v3 checkout.
-
-Use `npx pindeck@latest /path/to/deck` for the stable release. The beta channel does not replace it.
-The example deck is included in the repository; npm users supply their own deck.
+Use `npx pindeck@latest /path/to/deck` for the stable release; the beta channel does not replace it.
+Releases, with notes for each beta, are on [GitHub](https://github.com/ehabets/PinDeck/releases).
 
 Then open the login link PinDeck prints (`PinDeck: http://127.0.0.1:5180/login?code=...`). It works
 once and logs this browser in; for a new one, run `pindeck login` (or `node server.mjs login`).

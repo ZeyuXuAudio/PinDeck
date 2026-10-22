@@ -89,7 +89,7 @@ The staging workflow explicitly selects `beta` for prerelease versions (those co
 `latest` for stable versions. Approval publishes to the channel chosen when staging; it does not
 promote a beta to `latest`. Verify the staged version and channel before approving. Testers run
 `npx pindeck@beta /path/to/deck`; stable users run `npx pindeck@latest /path/to/deck`.
-Update the README’s availability notice when the branch and package actually become public.
+Each beta updates the version in the README’s notice and install example.
 
 ## Testing
 
