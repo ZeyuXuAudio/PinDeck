@@ -316,41 +316,29 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
 
 ## Versions
 
-* **2.9.0-beta.3** (2.9 beta): a security fix for shared servers, and Chrome features on Linux.
-  - Security: the editor page no longer contains the token, and the deck needs it too, so other users of
-    the same machine can no longer read either with `curl`. PinDeck prints a one-time login link at start
+* **2.9**: Linux as a beta, and safer editing.
+  - Linux (beta): PinDeck runs as a headless server, used from a Mac's browser through an SSH tunnel,
+    with Claude Code running on the server. The tunnel may use another local port than the server.
+    Screenshots, layout checks without an open editor and PDF export work when Chrome or Chromium is
+    found (`PINDECK_LINUX_CHROME=0` turns them off). Features a system cannot provide are switched off,
+    with the reason shown in the editor. Changes made to the deck by other programs are seen every
+    time, also after a file was replaced by a rename.
+  - Security: the editor page no longer contains the token, and the deck needs it too, so other users
+    of the same machine cannot read either. PinDeck prints a one-time login link at start
     (`pindeck login` prints a new one), which keeps the token in an HttpOnly cookie named after the
-    server's port. Headless Chrome logs in the same way, so the token is not on its command line either.
-    After a restart, log in again with a new link.
-  - Linux: screenshots, layout checks without an open editor and PDF export work when Chrome or
-    Chromium is found (tested on Ubuntu 24.04 with Google Chrome); `PINDECK_LINUX_CHROME=0` turns them
-    off. Snap's Chromium is found too.
-  - Linux: changes to the deck made by other programs are seen every time. Before, a file replaced by
-    a rename (how most editors save) was no longer watched, so later changes went unseen and the next
-    edit in PinDeck was refused. The tests now run on real Linux and macOS in CI.
-  - The deck's `AGENTS.md` reaches Claude along with its `CLAUDE.md`. Parent folders: later, as an option.
-
-* **2.9.0-beta.2** (2.9 beta): fixes from the first remote tests. Audio and video play in Safari: deck files
-  are sent with their length and byte ranges, and ogg, opus, m4a, aac, flac and mov get their media types.
-  A tunnel may use another local port than the server (`-L 8080:127.0.0.1:5180`). The points raised in
-  testing:
-  1. Wrong CLI path for decks outside the PinDeck folder: fixed. Claude gets the right command, and the
-     example's `CLAUDE.md` no longer names a path.
-  2. Files outside the deck folder: planned for 2.10.
-  3. Deck file other than `index.html`: planned for 2.10.
-  4. Claude editing other files of the deck: planned for 2.10.
-  5. `CLAUDE.md` in parent folders and `AGENTS.md`: the deck's `AGENTS.md` in 2.9.0-beta.3, parent folders
-     as an option.
-  6. Other slide frameworks than reveal.js: 2.10 recognises them and says so; support for more later.
-  7. Several decks in one server: planned for 2.10 or 2.11; run one PinDeck per deck meanwhile.
-  8. Other users on a shared server can read the editor's token: security fix in 2.9.0-beta.3. Until
-     then, use PinDeck only on servers where you trust all users.
-
-* **2.9.0-beta.1** (2.9 beta): runs on Linux as a headless server, used from a Mac's browser through an
-  SSH tunnel, with Claude Code running on the server. Features a system cannot provide are switched off
-  with a reason in the editor. Saving is atomic; edits made on files that changed meanwhile are refused,
-  and Undo/Redo no longer overwrite changes made outside PinDeck. `git-setup` works for decks behind
-  symlinks or with spaces in their path.
+    server's port; headless Chrome logs in the same way, so the token is never on a command line. After
+    a restart, log in again with a new link.
+  - Saving is atomic; edits made on files that changed meanwhile are refused, and Undo/Redo no longer
+    overwrite changes made outside PinDeck.
+  - Audio and video play in Safari: deck files are sent with their length and byte ranges, and ogg,
+    opus, m4a, aac, flac and mov get their media types.
+  - Claude gets the right CLI command for decks outside the PinDeck folder; the example's `CLAUDE.md`
+    no longer names a path. The deck's `AGENTS.md` reaches Claude along with its `CLAUDE.md`.
+  - macOS: pictures of PDF pages (`pdf-figure`) and of PowerPoint slides have a white page instead of a
+    transparent one, so dark text no longer disappears on a dark slide.
+  - Screenshots and PDF exports are no longer now and then reported as failed although Chrome wrote them.
+  - `git-setup` works for decks behind symlinks or with spaces in their path. The tests run on Linux
+    and macOS in CI, including a real Chrome.
 
 * **2.8.2**: declares macOS-only support in npm metadata and the README to prevent accidental
   installation on unsupported operating systems. Source launches on other platforms show a support
