@@ -261,7 +261,8 @@ function chrome(args, done) {
     proc.stdout.on("data", (d) => { out += d; check(); });
     proc.stderr.on("data", (d) => { err += d; check(); });
     proc.on("error", (e) => finish(reject, e));
-    proc.on("exit", () => (done(out, err) ? finish(resolve, out) : finish(reject, new Error("Chrome exited without output."))));
+    // "close", not "exit": at exit Chrome's last output (the line saying the file is written) may still be unread
+    proc.on("close", () => (done(out, err) ? finish(resolve, out) : finish(reject, new Error("Chrome exited without output."))));
     const timer = setTimeout(() => finish(reject, new Error("Chrome timed out.")), 25000);
   });
 }
