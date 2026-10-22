@@ -1,6 +1,6 @@
 # PinDeck
 
-> **macOS, and Linux as a beta · Version 3 beta preview** (`3.0.0-beta.1`). On Linux, PinDeck runs as a
+> **macOS, and Linux as a beta · Version 3 beta preview** (`3.0.0-beta.2`). On Linux, PinDeck runs as a
 > headless server that you use from your Mac's browser through an SSH tunnel (see
 > [Running on a Linux server](#running-on-a-linux-server-beta)). Windows is not supported. The beta is on
 > npm’s `beta` channel and the [`v3-beta`](https://github.com/ehabets/PinDeck/tree/v3-beta) branch; stable
@@ -42,7 +42,7 @@ Install the beta from npm:
 ```bash
 npx pindeck@beta /path/to/deck
 # Or select this exact beta:
-npx pindeck@3.0.0-beta.1 /path/to/deck
+npx pindeck@3.0.0-beta.2 /path/to/deck
 ```
 
 Or run it from the `v3-beta` branch, which includes the example deck:
@@ -460,6 +460,21 @@ Without PowerPoint or Keynote (or on other systems than macOS) only the text and
   Poppler, LibreOffice and ffmpeg on the server (see [Running on a Linux server](#running-on-a-linux-server-beta)).
 
 ## Versions
+
+* **3.0.0-beta.2**: everything from 2.9 and 2.10, with Codex brought up to it.
+  - Security: the fix from 2.9. The editor page no longer contains the token, and the deck needs it
+    too, so other users of the same machine cannot read either. PinDeck prints a one-time login link at
+    start (`pindeck login` prints a new one). Update from beta.1.
+  - Linux as a beta, safe saving, Undo/Redo that refuses to overwrite outside changes, decks with their
+    own file names, `--asset-root`, `@imports` in the deck's `CLAUDE.md` and `AGENTS.md`, and the other
+    2.9 and 2.10 changes (see below).
+  - Both assistants may edit and create other files of the deck, never `brand.css`, `vendor/`, `.git/`
+    or other decks in the folder; one Undo takes back a whole turn. Codex creates files with a new
+    `pindeck_write` tool and edits through PinDeck's safe saving.
+  - Claude may run only PinDeck's own commands (layout, shot, slides, pdf, pdf-figure), each named.
+  - Starting with `--provider codex` and no saved model now picks Codex's default model, also while
+    the model lists are still loading.
+  - Stopping PinDeck waits for every backend process, including those that list models.
 
 * **3.0.0-beta.1**: Claude and Codex adapters, discovered model/effort menu, explicit provider
   switching with optional handover, curated model lists, a separate effort selector with per-model
